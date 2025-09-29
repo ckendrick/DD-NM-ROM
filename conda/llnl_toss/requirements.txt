@@ -27,3 +27,4 @@ pydot
 pygments
 scipy
 silx
+wheel
