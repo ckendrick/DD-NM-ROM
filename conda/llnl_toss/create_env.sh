@@ -35,19 +35,34 @@ then
 else
     # Tuolumne
     if [ ! -d ${virtualenv_dir} ]; then
-	# Create virtualenv
-	module load python/3.11.5 rocm/6.3.1
+        # Create virtualenv
+        module load python/3.11.5 rocm/6.3.1
 
-	python3 -m venv ${virtualenv_dir}
+        python3 -m venv ${virtualenv_dir}
 
-	# store directory name for later
-	SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-	echo $SCRIPT_DIR
-	echo ${virtualenv_dir} >> ${SCRIPT_DIR}/venv_path.txt
+        # store directory name for later
+        SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+        echo $SCRIPT_DIR
+        echo ${virtualenv_dir} >> ${SCRIPT_DIR}/venv_path.txt
 
-	source ${virtualenv_dir}/bin/activate
+        source ${virtualenv_dir}/bin/activate
 
-	pip install -r ${SCRIPT_DIR}/${venv_file}
+        pip install -r ${SCRIPT_DIR}/${venv_file}
+
+        # Install torch-scatter and torch-sparse packages                                                                                             
+        # These are excluded from the requirements.txt file due to extra options needed
+
+        # refer to:
+        # https://github.com/ROCm/ROCm/issues/2783
+        # https://github.com/ROCm/hip/issues/3764
+        # https://github.com/pytorch/pytorch/issues/126804
+        export NVCC_FLAGS="-UHIP_ENABLE_WARP_SYNC_BUILTINS -U__HIP_NO_HALF_OPERATORS__ -U__HIP_NO_HALF_CONVERSIONS__ -DHIP_HAS_FP16=1"
+
+        # load same gcc module that was used to build torch package
+        module load gcc/11.2.1-magic
+
+        CC=mpicc CXX=mpicxx NVCC_FLAGS=$NVCC_FLAGS python -m pip install --verbose --no-build-isolation -e git+https://github.com/rusty1s/pytorch_sparse.git@master#egg=torch-sparse
+        CC=mpicc CXX=mpicxx NVCC_FLAGS=$NVCC_FLAGS python -m pip install --verbose --no-build-isolation -e git+https://github.com/rusty1s/pytorch_scatter.git@master#egg=torch-scatter
     fi
 
     source ${virtualenv_dir}/bin/activate

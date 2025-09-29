@@ -16,6 +16,8 @@ load_conda_env_toss() {
   env_name=toss
   anaconda_dir=/collab/usr/gapps/python/${SYS_TYPE}/anaconda3-2024.02
 
+  machine="${SYS_TYPE:-toss_4_x86_64_ib}"
+
   # Parse arguments
   local OPTIND;
   while getopts ":hd:n:" opt; do
@@ -46,5 +48,11 @@ load_conda_env_toss() {
 
   # Activate the environment
   source ${anaconda_dir}/bin/activate
+  if [[ "${machine}" == "toss_4_x86_64_ib_cray" ]] ;
+  then
+    # skip loading conda on tuolumne (virtualenv only)
+    return 0
+  fi
+
   conda activate ${env_name}
 }
