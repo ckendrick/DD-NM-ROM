@@ -21,6 +21,7 @@ with open(args.inpfile) as file:
 with open(inputs["pathfile"]) as file:
   paths = file.read().splitlines()
 sys.path.extend(paths)
+print(f"paths = {paths}")
 
 # Environment
 # =====================================

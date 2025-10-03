@@ -10,7 +10,7 @@
     },
     "inp_dir": "./../inputs_parallel_train/",
     "cmd_dir": "./../commands_parallel_train/",
-    "save_dir": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/nets/run.01/"
+    "save_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/nets/run.01/"
   },
 
   "dim": {

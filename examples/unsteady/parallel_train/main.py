@@ -44,27 +44,52 @@ for path in (
 # Batch script function
 # -------------------------------------
 def generate_batch_script(tag, pyscript, inpfile):
-  return f"\
-#!/bin/bash -i                                                        \n\
-                                                                      \n\
-### LSF syntax                                                        \n\
-### ---------------                                                   \n\
-#BSUB -nnodes 1                    #number of nodes                   \n\
-#BSUB -W 12:00                     #walltime in hours:minutes         \n\
-#BSUB -e train_rom_{tag}_err.txt   #stderr                            \n\
-#BSUB -o train_rom_{tag}_out.txt   #stdout                            \n\
-#BSUB -J train_rom_{tag}           #name of job                       \n\
-#BSUB -q pbatch                    #queue to use                      \n\
-#BSUB -G sosu                      #account                           \n\
-                                                                      \n\
-### Shell scripting                                                   \n\
-### ---------------                                                   \n\
-### Loading conda environment thanks to interactive shell             \n\
-### > See: 'dd-nm-rom/conda/README.md' file                           \n\
-load_conda_env_coral                                                  \n\
-### Launch program                                                    \n\
-python -u ./../../steady/scripts/{pyscript}.py --inpfile {inpfile}    \n\
-"
+    # Use triple quotes for a clean multiline string
+    return f"""#!/bin/bash -i
+#flux: -N 1
+#flux: -q pbatch
+#flux: -t 60
+#flux: --exclusive
+#flux: --setattr=thp=always
+#flux: --error=train_rom_{tag}_err.txt
+#flux: --job-name=train_rom_{tag}
+#flux: --output=train_rom_{tag}_out.txt
+
+### LSF syntax
+### ---------------
+#BSUB -nnodes 1                  #number of nodes
+#BSUB -W 12:00                   #walltime in hours:minutes
+#BSUB -e train_rom_{tag}_err.txt #stderr
+#BSUB -o train_rom_{tag}_out.txt #stdout
+#BSUB -J train_rom_{tag}         #name of job
+#BSUB -q pbatch                  #queue to use
+#BSUB -G sosu                    #account
+
+### Shell scripting
+### ---------------
+### Loading conda environment thanks to interactive shell
+### > See: 'dd-nm-rom/conda/README.md' file
+machine="${{SYS_TYPE:-toss_4_x86_64_ib}}"
+
+if [[ "${{machine}}" == "toss_4_x86_64_ib" ]] ;
+then
+    # Dane
+    load_conda_env_toss
+else
+    # Tuolumne
+    #source ddnmrom_env/bin/activate
+    # todo; assumes this is launched from the commands/ folder
+    venv_dir=$(cat ./../../../conda/llnl_toss/venv_path.txt)
+    echo $venv_dir
+
+    source $venv_dir/bin/activate
+
+    export MPICH_GPU_SUPPORT_ENABLED=1
+    export HSA_XNACK=1
+fi
+
+python -u ./../../steady/scripts/{pyscript}.py --inpfile {inpfile}
+"""
 
 # Looping over trainable elements
 # -------------------------------------
@@ -113,7 +138,7 @@ for element in inputs["elements"]:
     # Launch program
     # -------------
     subprocess.run(
-      f"bsub < {cmdfile_i}",
+      f"flux batch {cmdfile_i}",
       shell=True,
       timeout=1e2,
       stdout=subprocess.DEVNULL,

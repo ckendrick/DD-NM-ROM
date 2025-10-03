@@ -60,5 +60,5 @@
     },
     "n_workers": 50
   },
-  "save_dir": "/g/g92/zanardi1/Workspace/Codes/DD-NM-ROM/run/unsteady/dset.2by2/datagen/"
+  "save_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/datagen/"
 }

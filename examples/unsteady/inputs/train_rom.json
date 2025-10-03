@@ -47,7 +47,7 @@
     "n_workers": 32,
     "ranges": [0,2000],
     "key": "snapshots",
-    "path": "/g/g92/zanardi1/Workspace/Codes/DD-NM-ROM/run/unsteady/dset.2by2/datagen/train/"
+    "path": "/usr/workspace/nlrom/DD-NM-ROM/dataset/unsteady_5e-3_general/dset.2by2/datagen/train/"
   },
   "data": {
     "validation_split": 0.2,
@@ -72,7 +72,7 @@
     }
   },
   "model": {
-    "path": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/nets/run.01/",
+    "path": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/unsteady_5e-3_general/dset.2by2/nets/run.01/",
     "compile": {
       "optimizer": "adam",
       "lr": 1e-3,
