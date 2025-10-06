@@ -48,7 +48,7 @@ def generate_batch_script(tag, pyscript, inpfile):
     return f"""#!/bin/bash -i
 #flux: -N 1
 #flux: -q pbatch
-#flux: -t 60
+#flux: -t 1440
 #flux: --exclusive
 #flux: --setattr=thp=always
 #flux: --error=train_rom_{tag}_err.txt
