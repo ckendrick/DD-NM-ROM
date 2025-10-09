@@ -45,11 +45,13 @@ for path in (
 # -------------------------------------
 def generate_batch_script(tag, pyscript, inpfile):
     # Use triple quotes for a clean multiline string
-    return f"""#!/bin/bash -i
+    return f"""#!/bin/bash
 #flux: -N 1
-#flux: -q pbatch
-#flux: -t 1440
-#flux: --exclusive
+#flux: -n 1
+#flux: -c 8
+#flux: -o gpu-affinity=off
+#flux: -o mpibind=verbose:1
+#flux: -u
 #flux: --setattr=thp=always
 #flux: --error=train_rom_{tag}_err.txt
 #flux: --job-name=train_rom_{tag}
@@ -82,7 +84,9 @@ else
     venv_dir=$(cat ./../../../conda/llnl_toss/venv_path.txt)
     echo $venv_dir
 
+    echo "Activating venv.."
     source $venv_dir/bin/activate
+    echo "Done activating venv"
 
     export MPICH_GPU_SUPPORT_ENABLED=1
     export HSA_XNACK=1
@@ -121,6 +125,13 @@ for element in inputs["elements"]:
       inp_i["autoencoder"]["refine"] = True
       inp_i["model"]["compile"]["lr"] = inputs["refine"]["lr"]
       tag_i += "_ref"
+
+    # assign different devices for each job
+    if inp_i["env"]["device"]:
+      if inp_i["env"]["device"] == "cuda":
+        inp_i["env"]["device_idx"] = n_jobs % 4
+        print(" job {} using device {}".format(n_jobs,inp_i["env"]["device_idx"]))
+
     # > Save file
     inpfile_i = inputs["paths"]["inp_dir"] + f'/train_rom_{tag_i}.json'
     with open(inpfile_i, 'w') as file:
@@ -138,10 +149,10 @@ for element in inputs["elements"]:
     # Launch program
     # -------------
     subprocess.run(
-      f"flux batch {cmdfile_i}",
+      f"flux batch --flags waitable {cmdfile_i}",
       shell=True,
       timeout=1e2,
-      stdout=subprocess.DEVNULL,
+      stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT
     )
     n_jobs += 1
