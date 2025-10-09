@@ -1,10 +1,8 @@
 import copy
 import torch
-#from .soap import SOAP
+from .soap import SOAP
 
-#_OPTIM_IDS = ("sgd", "rmsprop", "adam", "adamw", "soap")
-_OPTIM_IDS = ("sgd", "rmsprop", "adam", "adamw")
-
+_OPTIM_IDS = ("sgd", "rmsprop", "adam", "adamw", "soap")
 
 def get(
   params,
@@ -23,7 +21,7 @@ def get(
       "rmsprop": torch.optim.RMSprop,
       "adam":    torch.optim.Adam,
       "adamw":   torch.optim.AdamW,
-      #"soap":    SOAP
+      "soap":    SOAP
     }[optimizer.lower()](params, lr=lr, weight_decay=weight_decay)
   else:
     raise ValueError(
