@@ -43,50 +43,81 @@ for path in (
 # Batch script function
 # -------------------------------------
 def generate_batch_script_toss(tag, inpfile):
-  return f"\
-#!/bin/bash -i                                                        \n\
-                                                                      \n\
-### Slurm syntax                                                      \n\
-### ---------------                                                   \n\
-#SBATCH -N 1                             #number of nodes             \n\
-#SBATCH -t 24:00:00                      #walltime in hours:minutes   \n\
-#SBATCH -e test_dd_nmrom_{tag}_err.txt   #stderr                      \n\
-#SBATCH -o test_dd_nmrom_{tag}_out.txt   #stdout                      \n\
-#SBATCH -J test_dd_nmrom_{tag}           #name of job                 \n\
-#SBATCH -p pbatch                        #queue to use                \n\
-#SBATCH -A sosu                          #account                     \n\
-                                                                      \n\
-### Shell scripting                                                   \n\
-### ---------------                                                   \n\
-### Loading conda environment thanks to interactive shell             \n\
-### > See: 'dd-nm-rom/conda/README.md' file                           \n\
-load_conda_env_toss                                                   \n\
-### Launch program                                                    \n\
-python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           \n\
-"
+    return f"""#!/bin/bash -i                                                                         
+                                                                         
+### Slurm syntax                                                                        
+### ---------------                                                                     
+#SBATCH -N 1                                 #number of nodes          
+#SBATCH -t 24:00:00                          #walltime in hours:minutes 
+#SBATCH -e test_dd_nmrom_{tag}_err.txt       #stderr                    
+#SBATCH -o test_dd_nmrom_{tag}_out.txt       #stdout                    
+#SBATCH -J test_dd_nmrom_{tag}               #name of job              
+#SBATCH -p pbatch                            #queue to use              
+#SBATCH -A sosu                              #account                   
+                                                                         
+### Shell scripting                                                                     
+### ---------------                                                                     
+### Loading conda environment thanks to interactive shell                               
+### > See: 'dd-nm-rom/conda/README.md' file                                             
+load_conda_env_toss                                                                      
+### Launch program                                                                      
+python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           
+"""
 
 def generate_batch_script_coral(tag, inpfile):
-  return f"\
-#!/bin/bash -i                                                        \n\
-                                                                      \n\
-### LSF syntax                                                        \n\
-### ---------------                                                   \n\
-#BSUB -nnodes 1                        #number of nodes               \n\
-#BSUB -W 12:00                         #walltime in hours:minutes     \n\
-#BSUB -e test_dd_nmrom_{tag}_err.txt   #stderr                        \n\
-#BSUB -o test_dd_nmrom_{tag}_out.txt   #stdout                        \n\
-#BSUB -J test_dd_nmrom_{tag}           #name of job                   \n\
-#BSUB -q pbatch                        #queue to use                  \n\
-#BSUB -G sosu                          #account                       \n\
-                                                                      \n\
-### Shell scripting                                                   \n\
-### ---------------                                                   \n\
-### Loading conda environment thanks to interactive shell             \n\
-### > See: 'dd-nm-rom/conda/README.md' file                           \n\
-load_conda_env_coral                                                  \n\
-### Launch program                                                    \n\
-python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           \n\
-"
+    return f"""#!/bin/bash -i                                                                         
+                                                                         
+### LSF syntax                                                                          
+### ---------------                                                                     
+#BSUB -nnodes 1                              #number of nodes            
+#BSUB -W 12:00                               #walltime in hours:minutes   
+#BSUB -e test_dd_nmrom_{tag}_err.txt         #stderr                      
+#BSUB -o test_dd_nmrom_{tag}_out.txt         #stdout                      
+#BSUB -J test_dd_nmrom_{tag}                 #name of job                
+#BSUB -q pbatch                              #queue to use                
+#BSUB -G sosu                                #account                     
+                                                                         
+### Shell scripting                                                                     
+### ---------------                                                                     
+### Loading conda environment thanks to interactive shell                               
+### > See: 'dd-nm-rom/conda/README.md' file                                             
+load_conda_env_coral                                                                     
+### Launch program                                                                      
+python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           
+"""
+
+def generate_batch_script_tuo(tag, inpfile):
+    return f"""#!/bin/bash
+#flux: -N 1
+#flux: -n 1
+#flux: -c 8
+#flux: -o gpu-affinity=off
+#flux: -o mpibind=verbose:1
+#flux: -u
+#flux: --setattr=thp=always
+#flux: --error=test_dd_nmrom_{tag}_err.txt
+#flux: --job-name=test_dd_nmrom_{tag}
+#flux: --output=test_dd_nmrom_{tag}_out.txt
+
+### Shell scripting 
+### ---------------
+### Loading conda environment thanks to interactive shell
+### > See: 'dd-nm-rom/conda/README.md' file
+#source ddnmrom_env/bin/activate
+# todo; assumes this is launched from the commands/ folder
+venv_dir=$(cat ./../../../conda/llnl_toss/venv_path.txt)
+echo $venv_dir
+
+echo "Activating venv.."
+source $venv_dir/bin/activate
+echo "Done activating venv"
+
+export MPICH_GPU_SUPPORT_ENABLED=1
+export HSA_XNACK=1
+
+### Launch program
+python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}
+"""
 
 if (inputs["system"] == "coral"):
   generate_batch_script = generate_batch_script_coral
@@ -94,6 +125,9 @@ if (inputs["system"] == "coral"):
 elif (inputs["system"] == "toss"):
   generate_batch_script = generate_batch_script_toss
   batch_cmd = lambda cmdfile: f"sbatch {cmdfile}"
+elif (inputs["system"] == "tuo"):
+  generate_batch_script = generate_batch_script_tuo
+  batch_cmd = lambda cmdfile: f"flux batch {cmdfile}"
 else:
   raise ValueError("System not valid.")
 
