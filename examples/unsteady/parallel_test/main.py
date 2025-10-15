@@ -127,7 +127,7 @@ elif (inputs["system"] == "toss"):
   batch_cmd = lambda cmdfile: f"sbatch {cmdfile}"
 elif (inputs["system"] == "tuo"):
   generate_batch_script = generate_batch_script_tuo
-  batch_cmd = lambda cmdfile: f"flux batch {cmdfile}"
+  batch_cmd = lambda cmdfile: f"flux batch --flags waitable {cmdfile}"
 else:
   raise ValueError("System not valid.")
 
@@ -175,7 +175,7 @@ for cfg in cfgs:
     batch_cmd(cmdfile_i),
     shell=True,
     timeout=1e2,
-    stdout=subprocess.DEVNULL,
+    stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT
   )
   n_jobs += 1

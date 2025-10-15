@@ -1,4 +1,4 @@
-#!/bin/bash -i
+#!/bin/bash
 #flux: -N 1
 #flux: -q pdebug
 #flux: -t 60

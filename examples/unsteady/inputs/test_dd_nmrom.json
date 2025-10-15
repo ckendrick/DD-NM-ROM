@@ -47,15 +47,15 @@
   "data_load": {
     "n_workers": 25,
     "ranges": [0,50],
-    "path": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/datagen/test/"
+    "path": "/usr/workspace/nlrom/DD-NM-ROM/dataset/unsteady_5e-3_general/dset.2by2/datagen/train/"
   },
   "paths": {
-    "pod_dir": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/pod/run.01/snapshots/",
-    "nets_dir": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/nets/run.01/",
+    "pod_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/pod/snapshots/",
+    "nets_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/nets/run.01/",
     "nets_tag": {
       "interior": "interior_ld_20_rnz_12",
       "port": "port_ld_10_rnz_8"
     },
-    "figs_dir": "/usr/workspace/zanardi1/Codes/DD-NM-ROM/run/unsteady/dset.2by2/figures/"
+    "figs_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/figures/"
   }
 }

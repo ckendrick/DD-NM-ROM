@@ -60,5 +60,5 @@
     "key": "snapshots",
     "path": "/usr/workspace/nlrom/DD-NM-ROM/dataset/unsteady_5e-3_general/dset.2by2/datagen/train/"
   },
-  "save_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/unsteady_5e-3_general/dset.2by2/pod/"
+  "save_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/pod/"
 }
