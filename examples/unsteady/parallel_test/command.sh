@@ -4,9 +4,9 @@
 #flux: -t 60
 #flux: --exclusive
 #flux: --setattr=thp=always
-#flux: --error=train_rom_err.txt
-#flux: --job-name=train_rom
-#flux: --output=train_rom_out.txt
+#flux: --error=test_rom_err.txt
+#flux: --job-name=test_rom
+#flux: --output=test_rom_out.txt
 
 ### Shell scripting
 ### ---------------
