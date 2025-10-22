@@ -11,6 +11,7 @@ import argparse
 # =====================================
 parser = argparse.ArgumentParser()
 parser.add_argument("--inpfile", type=str, help="path to JSON input file")
+parser.add_argument("--dry-run", action="store_true", help="Do not submit jobs, generate batch script and inputs only.")
 args = parser.parse_args()
 
 with open(args.inpfile) as file:
@@ -27,7 +28,7 @@ sys.path.extend(paths)
 import subprocess
 import numpy as np
 
-from dd_nm_rom import ops
+from dd_nm_rom import ops, jobs
 
 # Initialization
 # =====================================
@@ -42,92 +43,19 @@ for path in (
 # =====================================
 # Batch script function
 # -------------------------------------
-def generate_batch_script_toss(tag, inpfile):
-    return f"""#!/bin/bash -i                                                                         
-                                                                         
-### Slurm syntax                                                                        
-### ---------------                                                                     
-#SBATCH -N 1                                 #number of nodes          
-#SBATCH -t 24:00:00                          #walltime in hours:minutes 
-#SBATCH -e test_dd_nmrom_{tag}_err.txt       #stderr                    
-#SBATCH -o test_dd_nmrom_{tag}_out.txt       #stdout                    
-#SBATCH -J test_dd_nmrom_{tag}               #name of job              
-#SBATCH -p pbatch                            #queue to use              
-#SBATCH -A sosu                              #account                   
-                                                                         
-### Shell scripting                                                                     
-### ---------------                                                                     
-### Loading conda environment thanks to interactive shell                               
-### > See: 'dd-nm-rom/conda/README.md' file                                             
-load_conda_env_toss                                                                      
-### Launch program                                                                      
-python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           
-"""
+batch_opts = {"nodes": 1,
+              "queue": "pbatch"}
 
-def generate_batch_script_coral(tag, inpfile):
-    return f"""#!/bin/bash -i                                                                         
-                                                                         
-### LSF syntax                                                                          
-### ---------------                                                                     
-#BSUB -nnodes 1                              #number of nodes            
-#BSUB -W 12:00                               #walltime in hours:minutes   
-#BSUB -e test_dd_nmrom_{tag}_err.txt         #stderr                      
-#BSUB -o test_dd_nmrom_{tag}_out.txt         #stdout                      
-#BSUB -J test_dd_nmrom_{tag}                 #name of job                
-#BSUB -q pbatch                              #queue to use                
-#BSUB -G sosu                                #account                     
-                                                                         
-### Shell scripting                                                                     
-### ---------------                                                                     
-### Loading conda environment thanks to interactive shell                               
-### > See: 'dd-nm-rom/conda/README.md' file                                             
-load_conda_env_coral                                                                     
-### Launch program                                                                      
-python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}           
-"""
-
-def generate_batch_script_tuo(tag, inpfile):
-    return f"""#!/bin/bash
-#flux: -N 1
-#flux: -n 1
-#flux: -c 8
-#flux: -o gpu-affinity=off
-#flux: -o mpibind=verbose:1
-#flux: -u
-#flux: --setattr=thp=always
-#flux: --error=test_dd_nmrom_{tag}_err.txt
-#flux: --job-name=test_dd_nmrom_{tag}
-#flux: --output=test_dd_nmrom_{tag}_out.txt
-
-### Shell scripting 
-### ---------------
-### Loading conda environment thanks to interactive shell
-### > See: 'dd-nm-rom/conda/README.md' file
-#source ddnmrom_env/bin/activate
-# todo; assumes this is launched from the commands/ folder
-venv_dir=$(cat ./../../../conda/llnl_toss/venv_path.txt)
-echo $venv_dir
-
-echo "Activating venv.."
-source $venv_dir/bin/activate
-echo "Done activating venv"
-
-export MPICH_GPU_SUPPORT_ENABLED=1
-export HSA_XNACK=1
-
-### Launch program
-python -u ./../scripts/test_dd_nmrom.py --inpfile {inpfile}
-"""
-
-if (inputs["system"] == "coral"):
-  generate_batch_script = generate_batch_script_coral
+system = jobs.get_system()
+if (system == "coral"):
   batch_cmd = lambda cmdfile: f"bsub < {cmdfile}"
-elif (inputs["system"] == "toss"):
-  generate_batch_script = generate_batch_script_toss
+elif (system == "toss"):
   batch_cmd = lambda cmdfile: f"sbatch {cmdfile}"
-elif (inputs["system"] == "tuo"):
-  generate_batch_script = generate_batch_script_tuo
+elif (system == "tuo"):
   batch_cmd = lambda cmdfile: f"flux batch --flags waitable {cmdfile}"
+  # tuolumne-specific batch options:
+  batch_opts["queue"] = "" # remove queue, these jobs are wrapped in a flux instance
+  batch_opts["walltime"] = "1h"
 else:
   raise ValueError("System not valid.")
 
@@ -160,6 +88,13 @@ for cfg in cfgs:
     inp_i = json.load(file)
   for (element, etag) in tag_i.items():
     inp_i["paths"]["nets_tag"][element] = etag
+
+  # assign different devices for each job
+  if inp_i["env"]["device"]:
+    if inp_i["env"]["device"] == "cuda":
+        inp_i["env"]["device_idx"] = n_jobs % 4
+        print(" job {} using device {}".format(n_jobs,inp_i["env"]["device_idx"]))
+
   # > Save input file
   inpfile_i = inputs["paths"]["inp_dir"] + f'/test_dd_nmrom_{fulltag_i}.json'
   with open(inpfile_i, 'w') as file:
@@ -168,16 +103,19 @@ for cfg in cfgs:
   # -------------
   cmdfile_i = inputs["paths"]["cmd_dir"] + f'/test_dd_nmrom_{fulltag_i}.sh'
   with open(cmdfile_i, 'w') as file:
-    file.write(generate_batch_script(fulltag_i, inpfile_i))
+    file.write(jobs.generate_batch_script("test_dd_nmrom_" + fulltag_i,
+                                          "./../scripts/test_dd_nmrom.py",
+                                          inpfile_i, **batch_opts))
   # Launch program
   # -------------
-  subprocess.run(
-    batch_cmd(cmdfile_i),
-    shell=True,
-    timeout=1e2,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.STDOUT
-  )
+  if not args.dry_run:
+    subprocess.run(
+        batch_cmd(cmdfile_i),
+        shell=True,
+        timeout=1e2,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT
+    )
   n_jobs += 1
 
 print(f"\nTotal number of jobs: {n_jobs}\n")

@@ -11,6 +11,7 @@ import argparse
 # =====================================
 parser = argparse.ArgumentParser()
 parser.add_argument("--inpfile", type=str, help="path to JSON input file")
+parser.add_argument("--dry-run", action="store_true", help="Do not submit jobs, generate batch script and inputs only.")
 args = parser.parse_args()
 
 with open(args.inpfile) as file:
@@ -28,7 +29,7 @@ import copy
 import subprocess
 import numpy as np
 
-from dd_nm_rom import ops
+from dd_nm_rom import ops, jobs
 
 # Initialization
 # =====================================
@@ -43,57 +44,22 @@ for path in (
 # =====================================
 # Batch script function
 # -------------------------------------
-def generate_batch_script(tag, pyscript, inpfile):
-    # Use triple quotes for a clean multiline string
-    return f"""#!/bin/bash
-#flux: -N 1
-#flux: -n 1
-#flux: -c 8
-#flux: -o gpu-affinity=off
-#flux: -o mpibind=verbose:1
-#flux: -u
-#flux: --setattr=thp=always
-#flux: --error=train_rom_{tag}_err.txt
-#flux: --job-name=train_rom_{tag}
-#flux: --output=train_rom_{tag}_out.txt
+batch_opts = {"nodes": 1,
+              "queue": "pbatch"}
 
-### LSF syntax
-### ---------------
-#BSUB -nnodes 1                  #number of nodes
-#BSUB -W 12:00                   #walltime in hours:minutes
-#BSUB -e train_rom_{tag}_err.txt #stderr
-#BSUB -o train_rom_{tag}_out.txt #stdout
-#BSUB -J train_rom_{tag}         #name of job
-#BSUB -q pbatch                  #queue to use
-#BSUB -G sosu                    #account
+system = jobs.get_system()
+if (system == "coral"):
+  batch_cmd = lambda cmdfile: f"bsub < {cmdfile}"
+elif (system == "toss"):
+  batch_cmd = lambda cmdfile: f"sbatch {cmdfile}"
+elif (system == "tuo"):
+  batch_cmd = lambda cmdfile: f"flux batch --flags waitable {cmdfile}"
+  # tuolumne-specific batch options:
+  batch_opts["queue"] = "" # remove queue, these jobs are wrapped in a flux instance
+  batch_opts["walltime"] = "1h"
+else:
+  raise ValueError("System not valid.")
 
-### Shell scripting
-### ---------------
-### Loading conda environment thanks to interactive shell
-### > See: 'dd-nm-rom/conda/README.md' file
-machine="${{SYS_TYPE:-toss_4_x86_64_ib}}"
-
-if [[ "${{machine}}" == "toss_4_x86_64_ib" ]] ;
-then
-    # Dane
-    load_conda_env_toss
-else
-    # Tuolumne
-    #source ddnmrom_env/bin/activate
-    # todo; assumes this is launched from the commands/ folder
-    venv_dir=$(cat ./../../../conda/llnl_toss/venv_path.txt)
-    echo $venv_dir
-
-    echo "Activating venv.."
-    source $venv_dir/bin/activate
-    echo "Done activating venv"
-
-    export MPICH_GPU_SUPPORT_ENABLED=1
-    export HSA_XNACK=1
-fi
-
-python -u ./../../steady/scripts/{pyscript}.py --inpfile {inpfile}
-"""
 
 # Looping over trainable elements
 # -------------------------------------
@@ -145,16 +111,18 @@ for element in inputs["elements"]:
     # -------------
     cmdfile_i = inputs["paths"]["cmd_dir"] + f'/train_rom_{tag_i}.sh'
     with open(cmdfile_i, 'w') as file:
-      file.write(generate_batch_script(tag_i, pyscript_i, inpfile_i))
+      file.write(jobs.generate_batch_script("train_rom_"+tag_i,
+                                            f"./../../steady/scripts/{pyscript_i}.py", inpfile_i, **batch_opts))
     # Launch program
     # -------------
-    subprocess.run(
-      f"flux batch --flags waitable {cmdfile_i}",
-      shell=True,
-      timeout=1e2,
-      stdout=subprocess.PIPE,
-      stderr=subprocess.STDOUT
-    )
+    if not args.dry_run:
+        subprocess.run(
+            batch_cmd(cmdfile_i),
+            shell=True,
+            timeout=1e2,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+        )
     n_jobs += 1
 
 print(f"\nTotal number of jobs: {n_jobs}\n")
