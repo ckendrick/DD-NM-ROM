@@ -46,8 +46,8 @@
   },
   "data_load": {
     "n_workers": 25,
-    "ranges": [0,50],
-    "path": "/usr/workspace/nlrom/DD-NM-ROM/dataset/unsteady_5e-3_general/dset.2by2/datagen/train/"
+    "ranges": [0,10],
+    "path": "/usr/workspace/nlrom/DD-NM-ROM/dataset/unsteady_5e-3_general/dset.2by2/datagen/test/"
   },
   "paths": {
     "pod_dir": "/p/lustre5/cheung26/DD_NM_ROM_cole/examples/unsteady/dset.2by2/pod/snapshots/",
