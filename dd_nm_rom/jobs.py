@@ -42,7 +42,7 @@ def generate_batch_stub_flux(jobname, queue='pbatch', nodes=1, walltime="1d", ac
 ### Flux syntax
 ### ---------------
 #flux: -N {nodes:<30} #number of nodes
-#flux: -t {walltime:<30} #walltime in minutes
+{f"#flux: -t {walltime:<30} #walltime in minutes" if walltime is not "" else ""}
 #flux: -n 1
 #flux: -c 8
 #flux: -o gpu-affinity=off

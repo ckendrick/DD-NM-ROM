@@ -55,7 +55,7 @@ elif (system == "tuo"):
   batch_cmd = lambda cmdfile: f"flux batch --flags waitable {cmdfile}"
   # tuolumne-specific batch options:
   batch_opts["queue"] = "" # remove queue, these jobs are wrapped in a flux instance
-  batch_opts["walltime"] = "1h"
+  batch_opts["walltime"] = ""
 else:
   raise ValueError("System not valid.")
 
@@ -109,6 +109,7 @@ for cfg in cfgs:
   # Launch program
   # -------------
   if not args.dry_run:
+    print(" Launching job with '{}'".format(batch_cmd(cmdfile_i)))
     subprocess.run(
         batch_cmd(cmdfile_i),
         shell=True,
