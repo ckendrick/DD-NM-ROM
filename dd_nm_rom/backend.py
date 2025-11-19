@@ -137,7 +137,7 @@ def to_backend(x: Any) -> Union[np.ndarray, torch.Tensor]:
       if torch.is_tensor(x):
         return x
       else:
-        return torch.as_tensor(to_numpy(x), dtype=floatx("torch"))
+        return torch.as_tensor(to_numpy(x), dtype=floatx("torch"), device=device())
     else:
       return to_numpy(x)
 
@@ -159,6 +159,22 @@ def to_sparse(
   :rtype: sp.sparse.spmatrix
   """
   return x.tocsr() if sp.sparse.issparse(x) else sp.sparse.csr_matrix(x)
+
+def to_sp_backend(x: sp.sparse.spmatrix) -> torch.Tensor:
+    if (x is not None):
+        if (_BKD == "torch"):
+            if torch.is_tensor(x):
+                return x.to_sparse_csr().cuda()
+            else:
+                #return torch.sparse_csr_tensor(x.indptr, x.indices, x.data, x.shape, device=device())
+                return torch.sparse_csr_tensor(x.indptr, x.indices, x.data, x.shape)
+
+        else:
+            return x
+
+def torch_csr_to_scipy(x: torch.Tensor) -> sp.sparse.spmatrix:
+    if not torch.is_tensor(x): return x
+    return sp.sparse.csr_matrix((x.values().cpu(), x.col_indices().cpu(), x.crow_indices().cpu()), shape=(x.shape[0], x.shape[1]))
 
 # Device
 # -------------------------------------
@@ -211,7 +227,7 @@ def set_device(
     torch.set_num_interop_threads(nb_threads)
     torch.set_num_threads(nb_threads)
   except:
-    pass
+    raise RuntimeWarning("failed to set device")
 
 # Epsilon
 # -------------------------------------
@@ -363,3 +379,10 @@ def set_seed(
     torch.manual_seed(value)
     # torch.use_deterministic_algorithms(True)
     os.environ["PYTHONHASHSEED"] = str(value)
+
+
+def is_torch_backend():
+    if _BKD == "torch":
+        return True
+    else:
+        return False

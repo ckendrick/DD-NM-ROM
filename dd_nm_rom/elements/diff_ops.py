@@ -1,10 +1,12 @@
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 from typing import List
 
 from . import mesh as mesh_mod
 from . import bound_cond as bc_mod
+from .. import backend as bkd
 
 
 class DiffOperators(object):
@@ -102,9 +104,13 @@ class DiffOperators(object):
         op += stencil[index] * bc_op
     # Map over 2D grid
     if (axis == "x"):
+      #op = torch.kron(torch.eye(n["y"]), op)
       op = sp.kron(sp.eye(n["y"]), op)
     else:
+      #op = torch.kron(op, torch.eye(n["x"]))
       op = sp.kron(op, sp.eye(n["x"]))
+    #return torch.sparse_csr_tensor(op_s.indptr, op_s.indices, op_s.data, op_s.shape)
+    #return op.to_sparse_csr()
     return op.tocsr()
 
   def build_upwind_1st(self) -> None:
@@ -231,6 +237,13 @@ class DiffOperators(object):
           # Standard second-order central for diffusion
           Di = self._build_op(axis, stencil=[1, -2, 1], diags=[-1, 0, 1])
           self.ops["D"] = self.ops["D"] + (self.nu/h**2) * Di
+
+      if bkd.is_torch_backend():
+          for op in self.ops:
+              if sp.issparse(self.ops[op]):
+                  self.ops[op] = bkd.to_sp_backend(self.ops[op])
+              else:
+                  self.ops[op] = bkd.to_backend(self.ops[op])
       self.built = True
 
   def _build_extended_op_gen(

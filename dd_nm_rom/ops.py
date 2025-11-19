@@ -1,6 +1,7 @@
 import collections
 import numpy as np
 import scipy as sp
+import torch.sparse
 
 from typing import Any, Dict, List
 
@@ -21,7 +22,11 @@ def sp_diag(
   """
   if (x.ndim != 1):
     raise ValueError("A 1D array is needed to build a sparse diagonal matrix.")
-  return sp.sparse.spdiags(x, 0, x.size, x.size)
+
+  if isinstance(x, np.ndarray):
+    return sp.sparse.spdiags(x, 0, x.size, x.size)
+  else:
+    return torch.sparse.spdiags(x.cpu(), torch.tensor([0]).cpu(), (x.size(0), x.size(0)), torch.sparse_csr).cuda()
 
 def map_nested_dict(
   obj: Any,

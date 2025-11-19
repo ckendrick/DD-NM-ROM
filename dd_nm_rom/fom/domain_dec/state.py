@@ -2,6 +2,7 @@ import numpy as np
 import scipy.sparse as sp
 
 from dd_nm_rom import ops
+from dd_nm_rom import backend as bkd
 
 from . import dtypes
 
@@ -36,11 +37,13 @@ class SubdomainElementState(object):
   # -----------------------------------
   def set_ops_bc(self) -> None:
     # Inclusion operators
-    self.iden = self.monolithic.iden[self.submat]
+    self.iden = bkd.torch_csr_to_scipy(self.monolithic.iden)[self.submat]
+    #self.iden = self.monolithic.iden[self.submat]
     self.iden_uv = sp.block_diag([self.iden, self.iden])
     # Differential operators
     self.ops = {}
     for (op_k, op_v) in self.monolithic.ops.items():
+      op_v = bkd.torch_csr_to_scipy(op_v)
       self.ops[op_k] = op_v[self.submat]
     # Boundary conditions
     self.bc_f = ops.map_nested_dict(

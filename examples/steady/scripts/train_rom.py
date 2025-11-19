@@ -37,6 +37,8 @@ from dd_nm_rom import fom as fom_mod
 from dd_nm_rom import field as field_mod
 from dd_nm_rom.elements import mesh as mesh_mod
 from dd_nm_rom.rom.nonlinear import Autoencoder, Data, Model
+from dd_nm_rom import backend as bkd
+
 
 # Initialization
 # =====================================

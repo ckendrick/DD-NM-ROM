@@ -6,6 +6,7 @@ matplotlib
 numpy-indexed
 pandas
 pydoe
+pyinstrument
 scikit-learn
 simpy
 sparselinear
@@ -21,6 +22,7 @@ ipykernel
 jupyterlab
 markdown
 markupsafe
+mpi4py==4.1.1.dev0+mpich.8.1.32
 notebook
 numpy
 pydot

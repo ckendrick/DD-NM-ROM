@@ -37,6 +37,7 @@ else
     if [ ! -d ${virtualenv_dir} ]; then
         # Create virtualenv
         module load python/3.11.5 rocm/6.3.1
+        module load rccl
 
         python3 -m venv ${virtualenv_dir}
 

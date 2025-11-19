@@ -1,10 +1,12 @@
 import numpy as np
 import scipy.sparse as sp
+import torch.sparse
 
 from time import time
 
 from . import dtypes
 from .basic import Solver
+from .. import backend as bkd
 
 
 class Newton(Solver):
@@ -83,7 +85,12 @@ class Newton(Solver):
     step_hist = [0.0]
     self.model.runtime["total"] += time()-start
     # > Choose a sparse or dense linear solver depending on the problem
-    solve = sp.linalg.spsolve if sp.issparse(jac) else np.linalg.solve
+    if isinstance(x0, np.ndarray):
+        solve = sp.linalg.spsolve if sp.issparse(jac) else np.linalg.solve
+    else:
+        #TODO: torch sparse solve not supported for HIP?
+        #solve = torch.sparse.spsolve if jac.is_sparse_csr or jac.is_sparse else torch.linalg.solve
+        solve = torch.linalg.solve
     # > Print first step
     self.print_step(it, step_hist[-1], res_norm_hist[-1], header=True)
     # Loop until convergence
@@ -92,7 +99,10 @@ class Newton(Solver):
     while ((res_norm_hist[-1] >= self.tol) and (it < self.maxit)):
       # > Initialize line search
       start = time()
-      dx = solve(jac,-res)
+      if bkd.is_torch_backend():
+        dx = solve(jac.to_dense(),-res.to_dense())
+      else:
+        dx = solve(jac, -res)
       delta = time()-start
       self.model.runtime["total"] += delta
       self.model.runtime["lin_solve"] += delta
@@ -120,13 +130,24 @@ class Newton(Solver):
     # Return result
     # ---------------
     start = time()
-    out = (
-      x,
-      np.vstack(res_hist),
-      np.array(res_norm_hist),
-      np.array(step_hist),
-      np.array(it).reshape(1),
-      np.array(flag).reshape(1)
-    )
+    if bkd.is_torch_backend():
+        #print(torch.cuda.memory.memory_summary())
+        out = (
+            x,
+            torch.vstack(res_hist),
+            np.array(res_norm_hist),
+            np.array(step_hist),
+            np.array(it).reshape(1),
+            np.array(flag).reshape(1)
+        )
+    else:
+        out = (
+            x,
+            np.vstack(res_hist),
+            np.array(res_norm_hist),
+            np.array(step_hist),
+            np.array(it).reshape(1),
+            np.array(flag).reshape(1)
+        )
     self.model.runtime["total"] += time()-start
     return out

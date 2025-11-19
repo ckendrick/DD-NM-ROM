@@ -1,11 +1,13 @@
 import abc
 import numpy as np
+import torch
 
 from time import time
 from typing import Tuple, Union
 from typing_extensions import Unpack
 
 from . import dtypes
+from .. import backend as bkd
 
 
 class Solver(object):
@@ -151,11 +153,11 @@ class Solver(object):
         print("Execution time: {:.5e} s".format(time()-texec))
     # Return
     start = time()
-    x = np.vstack(x).T
+    x = torch.vstack(x).T if bkd.is_torch_backend() else np.vstack(x).T
     if ((dt == 0.0) and (nt == 1)):
       x = x[:,-1]
       if x.ndim == 1:
-        x = x[np.newaxis, :].T
+        x = x[None, :].T if bkd.is_torch_backend() else x[np.newaxis, :].T
       steps = [obj[-1] for obj in steps]
     self.model.runtime["total"] += time()-start
     return x, *steps
@@ -252,9 +254,9 @@ class Solver(object):
     """
     res, jac = self.model.res_jac(x)
     start = time()
-    res_norm = np.dot(res,res)
+    res_norm = torch.dot(res, res) if bkd.is_torch_backend() else np.dot(res,res)
     if (not self.squared_res):
-      res_norm = np.sqrt(res_norm)
+      res_norm = res_norm.sqrt_() if bkd.is_torch_backend() else np.sqrt(res_norm)
     self.model.runtime["total"] += time()-start
     return res, jac, float(res_norm)
 
