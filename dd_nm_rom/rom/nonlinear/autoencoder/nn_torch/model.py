@@ -1,6 +1,8 @@
 import os
 import numpy as np
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from . import optimization as optim
 from dd_nm_rom import backend as bkd
@@ -39,6 +41,17 @@ class Model(object):
     self.is_compiled = False
     self.stop_training = False
 
+    if bkd.distributed():
+        if torch.accelerator.device_count() > 1:
+          print("MODEL:: creating DDP with device_ids = {}".format(bkd.get_rank()))
+          self.ddp_net = DDP(self.net, device_ids=[bkd.get_rank()])
+        else:
+          print("MODEL:: creating DDP with device_ids = {}".format(bkd.device()))
+          self.ddp_net = DDP(self.net, device_ids=None)
+        self.net = self.ddp_net.module
+    else:
+        self.ddp_net = self.net
+
   # Compiling
   # ---------------------------------
   def compile(
@@ -54,7 +67,11 @@ class Model(object):
   ):
     print("Compiling the model ...")
     # Write nn summary
-    self.net.summary(filename=self.dirs["save"] + "/summary.txt")
+    # summary(filename=self.dirs["save"] + "/summary.txt")
+    summary_fname = self.dirs["save"] + "/summary.txt"
+    if bkd.distributed():
+      summary_fname = summary_fname + ".{:d}".format(bkd.get_rank())
+    self.net.summary(filename=summary_fname)
     # Initializing loss function
     self.loss = optim.losses.get(loss, reduction=reduction)
     # Monitor metrics
@@ -64,7 +81,7 @@ class Model(object):
       raise ValueError(f"Monitor metrics not valid. Please choose: {options}")
     # Initializing the optimizer
     self.optimizer, self.lr_scheduler = optim.optimizers.get(
-      self.net.parameters(),
+      self.ddp_net.parameters(),
       optimizer,
       lr=lr,
       lr_decay=lr_decay,
@@ -91,7 +108,14 @@ class Model(object):
       # Training
       self.callbacks.set_display_freq(display_freq)
       self.callbacks.on_train_begin()
-      self.train_sgd()
+      if bkd.distributed():
+        with self.ddp_net.join():
+          self.train_sgd()
+        #torch.cuda.synchronize(device=bkd.get_rank())
+        torch.cuda.synchronize()
+        bkd._COMM.Barrier()
+      else:
+        self.train_sgd()
       self.callbacks.on_train_end()
     else:
       print("Warning! Training skipped since the model is not trainable!")
@@ -150,35 +174,38 @@ class Model(object):
   # ---------------------------------
   def evaluate(self):
     if (self.data.valid is not None):
-      self.net.train(mode=False)
+      self.ddp_net.train(mode=False)
       for batch in self.data.batches_valid:
         loss = self.evaluate_step(batch.to(bkd.device()))
         # Update logs
         self.train_state.on_batch_end({"val_loss": loss})
 
   def evaluate_step(self, data):
-    return self.loss(self.net(data), data)
+    return self.loss(self.ddp_net(data), data)
 
   # Saving
   # ---------------------------------
   def save(self, filename=None):
     if (filename is None):
       filename = self.dirs["save"] + "/model_last"
-    torch.save(self.net.state_dict(), filename+"_torch.p")
-    torch.save(self.net.state_dict_np(), filename+"_numpy.p")
+    if not bkd.distributed() or bkd.get_rank() == 0:
+        torch.save(self.ddp_net.state_dict(), filename+"_torch.p")
+        torch.save(self.net.state_dict_np(), filename+"_numpy.p")
 
-    # Save complete checkpoint with optimizer and scheduler state
-    checkpoint = {
-        'model_state_dict': self.net.state_dict(),
-        'optimizer_state_dict': self.optimizer.state_dict(),
-        'epoch': self.train_state.epoch,
-        'random_state': np.random.get_state()
-    }
+        # Save complete checkpoint with optimizer and scheduler state
+        checkpoint = {
+            'model_state_dict': self.ddp_net.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'epoch': self.train_state.epoch,
+            'random_state': np.random.get_state()
+        }
 
-    if self.lr_scheduler is not None:
-        checkpoint['scheduler_state_dict'] = self.lr_scheduler.state_dict()
+        if self.lr_scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.lr_scheduler.state_dict()
 
-    torch.save(checkpoint, filename + "_checkpoint.p")
+        torch.save(checkpoint, filename + "_checkpoint.p")
+    if bkd.distributed():
+      dist.barrier()
 
   def load_checkpoint(self, checkpoint_path):
     checkpoint = torch.load(checkpoint_path,  weights_only=False)

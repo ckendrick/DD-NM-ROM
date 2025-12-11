@@ -4,10 +4,11 @@ import types
 import inspect
 import joblib as jl
 import dill as pickle
+import numpy as np
 
 from tqdm import tqdm
 from typing import Any, List, Union
-
+from . import backend as bkd
 
 # Classes
 # =====================================
@@ -153,8 +154,24 @@ def load_case_parallel(
   :return: A list of loaded cases.
   :rtype: List[Any]
   """
+  if bkd.distributed():
+    ranges = np.arange(*ranges).tolist()
+    range_per_rank = len(ranges) // bkd.get_nranks()
+    #print(" TOTAL RANGES {} split into {} per rank!".format(len(ranges), range_per_rank))
+    rank = bkd.get_rank()
+    start = rank * range_per_rank
+    end = (rank+1) * range_per_rank
+    extra = len(ranges) % bkd.get_nranks()
+    if extra != 0 and rank == bkd.get_nranks() - 1:
+      end += extra
+    ranges = ranges[start:end]
+    #print(" RANK {} loading {} ranges: {} ({})".format(rank, len(ranges), ranges, ranges))
+    bkd._COMM.Barrier()
+  else:
+    ranges = range(*ranges)
+
   iterable = tqdm(
-    iterable=range(*ranges),
+    iterable=ranges,
     ncols=80,
     desc="> Cases",
     file=sys.stdout
@@ -164,7 +181,11 @@ def load_case_parallel(
       jl.delayed(load_case)(path=path, index=i, key=key) for i in iterable
     )
   else:
-    return [load_case(path=path, index=i, key=key) for i in iterable]
+    cases = [load_case(path=path, index=i, key=key) for i in iterable]
+    if bkd.distributed():
+        bkd._COMM.Barrier()
+    return cases
+
 
 def generate_case_parallel(
   sol_fun: callable,

@@ -13,10 +13,11 @@ class Data(object):
     batch_size=32,
     eps=1e-5
   ):
-    self.snapshots = torch.from_numpy(snapshots)
-    self.snapshots = self.snapshots.to(device="cpu", dtype=bkd.floatx())
+    #self.snapshots = torch.from_numpy(snapshots)
+    #self.snapshots = self.snapshots.to(device="cpu", dtype=bkd.floatx())
+    self.snapshots = bkd.to_backend(snapshots)
     # Normalization
-    self.normalize(snapshots, eps=eps)
+    self.normalize(self.snapshots, eps=eps)
     # Data
     self.train = None
     self.valid = None
@@ -28,10 +29,10 @@ class Data(object):
     self.batch_size = batch_size
 
   def normalize(self, data, eps=1e-5):
-    amin = np.amin(data, axis=0)
-    amax = np.amax(data, axis=0)
+    amin = torch.amin(data, dim=0)
+    amax = torch.amax(data, dim=0)
     ref, scale = 0.5*(amax+amin), 0.5*(amax-amin)
-    indices = np.isclose(scale, 0.0, rtol=0.0, atol=eps)
+    indices = torch.isclose(scale, torch.tensor(0.0), rtol=0.0, atol=eps)
     scale[indices] = 1.0
     self.ref = bkd.to_backend(ref)
     self.scale = bkd.to_backend(scale)

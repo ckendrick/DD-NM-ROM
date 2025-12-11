@@ -37,6 +37,7 @@ from dd_nm_rom import fom as fom_mod
 from dd_nm_rom import field as field_mod
 from dd_nm_rom.elements import mesh as mesh_mod
 from dd_nm_rom.rom.nonlinear import Autoencoder, Data, Model
+from dd_nm_rom import backend as bkd
 
 # Initialization
 # =====================================
@@ -68,6 +69,8 @@ dd_fom.build()
 print("\nLoading data ...")
 dataset = utils.load_case_parallel(**inputs["data_load"])
 dataset = np.vstack([x for x in dataset if x is not None])
+
+bkd._COMM.Barrier()
 print("> Map dataset on DD elements")
 dataset = dd_fom.map_sol_on_elements(dataset, map_on_ports=True)
 
@@ -159,3 +162,7 @@ for model in nn_models:
   shutil.copyfile(args.inpfile, path_i+"/inputs.json")
 
 print("\nDone!\n")
+
+# cleanup any distributed environments
+if bkd.distributed():
+  bkd.finalize_distributed()

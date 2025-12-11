@@ -1,5 +1,8 @@
 import os
+import socket
+from mpi4py import MPI
 import torch
+import torch.distributed as dist
 import random
 import numpy as np
 import scipy as sp
@@ -13,6 +16,9 @@ _SEED = None
 _VALID_BKD = {"numpy", "torch"}
 _VALID_DEVICE = {"cpu", "cuda"}
 _VALID_DTYPE = {"float32", "float64"}
+_COMM = None
+_RANK = None
+_NRANKS = None
 
 # Setting
 # -------------------------------------
@@ -54,6 +60,14 @@ def set(
   :rtype: None
   """
   set_backend(backend)
+  if is_torch_backend():
+    init_distributed()
+    # TODO: some schedulers handle binding automatically, so device_count will always=1
+    if (_NRANKS > 1 and torch.accelerator.device_count() > 1):
+      # TODO: fix this to work for multiple nodes!
+      device_idx = _RANK % _NRANKS
+      #print(" BACKEND: RANK {} reassigning device_idx to {}".format(_RANK, device_idx))
+
   set_seed(seed)
   set_device(device, device_idx, nb_threads)
   set_floatx(floatx)
@@ -386,3 +400,70 @@ def is_torch_backend():
         return True
     else:
         return False
+
+
+def init_distributed():
+  global _COMM, _RANK, _NRANKS
+  _COMM = MPI.COMM_WORLD
+  _RANK = _COMM.Get_rank()
+  _NRANKS = _COMM.Get_size()
+
+  print(" INIT DISTRIBUTED: rank = {}, num ranks = {}".format(_RANK, _NRANKS))
+
+  if _NRANKS > 1:
+    # Broadcast root hostname to all other ranks
+    root_addr = None
+    if _RANK == 0:
+      root_addr = socket.gethostname()
+    root_addr = _COMM.bcast(root_addr, root=0)
+
+    os.environ["MASTER_ADDR"] = root_addr
+    os.environ["MASTER_PORT"] = "23457"
+
+    print(" -- FLUX_JOB_SIZE = {} FLUX_TASK_RANK = {}".format(int(os.environ.get('FLUX_JOB_SIZE')), int(os.environ.get('FLUX_TASK_RANK'))))
+
+    # Use FLUX vars if available, else fallback to MPI
+    world_size = int(os.environ.get('FLUX_JOB_SIZE', _NRANKS))
+    rank_env = int(os.environ.get('FLUX_TASK_RANK', _RANK))
+
+    backend = "gloo" if get_backend() == "cpu" else "nccl"
+
+    print("  Creating torch process group: world size = {} rank = {}, backend type = '{}'".format(world_size, rank_env, backend))
+    print("   RANK {} number of available devices = {}".format(_RANK, torch.accelerator.device_count()))
+
+    # Set up process group
+    dist.init_process_group(
+        backend=backend,
+        init_method="env://",
+        rank=rank_env,
+        world_size=world_size
+    )
+  else:
+    print("Serial mode; no distributed!")
+
+  print("   RANK {}: Initialized on device '{}'".format(_RANK, torch.cuda.get_device_name()))
+  print("   RANK {}:   Device properties: {}".format(_RANK, torch.cuda.get_device_properties()))
+
+
+
+def finalize_distributed():
+  dist.destroy_process_group()
+
+
+def distributed():
+  if _NRANKS is not None and _NRANKS > 1:
+    return True
+  return False
+
+def get_rank():
+  if _RANK is not None:
+    return _RANK
+  else:
+    raise RuntimeError("Tried to get rank, but not using distributed!")
+
+def get_nranks():
+  if _NRANKS is not None:
+    return _NRANKS
+  else:
+    raise RuntimeError("Tried to get number of ranks, but not using distributed!")
+
