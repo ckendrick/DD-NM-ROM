@@ -42,7 +42,8 @@ class DD_NM_ROM(object):
     self.scaling = self.mesh.hxy if (scaling <= 0) else scaling
     # Autoencoders
     # -------------
-    self.nn_configs = ops.map_nested_dict(nn_configfiles, torch.load)
+    load_opts = {"weights_only":False}
+    self.nn_configs = ops.map_nested_dict(nn_configfiles, torch.load, **load_opts)
     self.nn_models = self.init_nn_models(self.nn_configs)
     # Forcing term
     self.force = self.dd_fom.f is not None

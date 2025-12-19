@@ -30,7 +30,8 @@ def sp_diag(
 
 def map_nested_dict(
   obj: Any,
-  fun: callable
+  fun: callable,
+  **kwargs
 ) -> Any:
   """
   Recursively apply a function to all values in a nested dictionary.
@@ -47,12 +48,12 @@ def map_nested_dict(
   :rtype: Any
   """
   if isinstance(obj, collections.abc.Mapping):
-    return {k: map_nested_dict(v, fun) for (k, v) in obj.items()}
+    return {k: map_nested_dict(v, fun, **kwargs) for (k, v) in obj.items()}
   else:
     if isinstance(obj, (list, tuple)):
-      return [fun(x) for x in obj]
+      return [fun(x, **kwargs) for x in obj]
     else:
-      return fun(obj)
+      return fun(obj, **kwargs)
 
 def face_splitting(
   A: np.ndarray,
