@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import time
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -109,7 +110,7 @@ class Model(object):
       self.callbacks.set_display_freq(display_freq)
       self.callbacks.on_train_begin()
       if bkd.distributed():
-        with self.ddp_net.join():
+        with self.ddp_net.join(throw_on_early_termination=True):
           self.train_sgd()
         #torch.cuda.synchronize(device=bkd.get_rank())
         torch.cuda.synchronize()
@@ -188,7 +189,11 @@ class Model(object):
   def save(self, filename=None):
     if (filename is None):
       filename = self.dirs["save"] + "/model_last"
+    if bkd.distributed():
+      dist.barrier()
+      bkd._COMM.Barrier()
     if not bkd.distributed() or bkd.get_rank() == 0:
+        start_time = time.time()
         torch.save(self.ddp_net.state_dict(), filename+"_torch.p")
         torch.save(self.net.state_dict_np(), filename+"_numpy.p")
 
@@ -204,8 +209,12 @@ class Model(object):
             checkpoint['scheduler_state_dict'] = self.lr_scheduler.state_dict()
 
         torch.save(checkpoint, filename + "_checkpoint.p")
+
+        end_time = time.time() - start_time
+        print("  -- Checkpoint time: {:.5e} s".format(end_time))
     if bkd.distributed():
       dist.barrier()
+      bkd._COMM.Barrier()
 
   def load_checkpoint(self, checkpoint_path):
     checkpoint = torch.load(checkpoint_path,  weights_only=False)
@@ -221,5 +230,9 @@ class Model(object):
     # Restore random state
     if 'random_state' in checkpoint:
       np.random.set_state(checkpoint['random_state'])
+
+    if bkd.distributed():
+      dist.barrier()
+      bkd._COMM.Barrier()
 
     return checkpoint

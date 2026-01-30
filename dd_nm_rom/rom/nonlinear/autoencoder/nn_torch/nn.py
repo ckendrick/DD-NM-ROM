@@ -248,6 +248,9 @@ class Autoencoder(torch.nn.Module):
     return x
 
   def summary(self, filename=None, verbose=2):
+    if bkd.distributed() and bkd.get_rank() != 0:
+      # only print summary on root rank
+      return
     stats = torchinfo.summary(
       model=self,
       input_size=(self.input_dim,),
