@@ -42,7 +42,9 @@ class Model(object):
     self.is_compiled = False
     self.stop_training = False
 
+    self.rank = 0
     if bkd.distributed():
+        self.rank = bkd.get_rank()
         if torch.accelerator.device_count() > 1:
           print("MODEL:: creating DDP with device_ids = {}".format(bkd.get_rank()))
           self.ddp_net = DDP(self.net, device_ids=[bkd.get_rank()])
@@ -132,7 +134,7 @@ class Model(object):
       self.callbacks.on_epoch_begin()
       self.data.on_epoch_begin()
       # Train step
-      self.net.train(mode=True)
+      self.ddp_net.train(mode=True)
       for batch in self.data.batches:
         # On batch begin calls
         self.callbacks.on_batch_begin()
