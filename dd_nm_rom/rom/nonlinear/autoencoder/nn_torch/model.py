@@ -221,13 +221,14 @@ class Model(object):
   def load_checkpoint(self, checkpoint_path):
     checkpoint = torch.load(checkpoint_path,  weights_only=False)
 
-    # Load optimizer state
-    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     self.train_state.epoch = checkpoint['epoch']
 
     # Load scheduler if available
     if 'scheduler_state_dict' in checkpoint and self.lr_scheduler is not None:
         self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+    # Load optimizer state - must be done after LR Scheduler!
+    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     # Restore random state
     if 'random_state' in checkpoint:
