@@ -241,3 +241,19 @@ def generate_case_parallel(
   if verbose:
 #   print(f"> Total converged cases: {sum(converged)}/{n_samples}")
     print(f"> Total converged cases: {sum(converged)}/{len(iterable_indices)}")
+
+
+def parallel_print(str):
+  """
+  Prints str in order on each rank
+  NOTE: assumes all ranks will call this
+  """
+  if not bkd.distributed():
+    print(str)
+    return
+
+  for rank in range(bkd.get_nranks()):
+    if (rank == bkd.get_rank()):
+      print(str)
+    bkd.barrier()
+  bkd.barrier()

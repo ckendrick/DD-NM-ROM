@@ -204,7 +204,8 @@ class Model(object):
             'model_state_dict': self.ddp_net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'epoch': self.train_state.epoch,
-            'random_state': np.random.get_state()
+            'random_state_np': np.random.get_state(),
+            'random_state': torch.cuda.get_rng_state(device=bkd.device())
         }
 
         if self.lr_scheduler is not None:
@@ -232,7 +233,8 @@ class Model(object):
 
     # Restore random state
     if 'random_state' in checkpoint:
-      np.random.set_state(checkpoint['random_state'])
+      np.random.set_state(checkpoint['random_state_np'])
+      torch.cuda.set_rng_state(checkpoint['random_state'], device=bkd.device())
 
     if bkd.distributed():
       dist.barrier()

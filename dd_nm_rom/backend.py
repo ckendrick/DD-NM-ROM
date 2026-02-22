@@ -391,6 +391,7 @@ def set_seed(
     random.seed(value)
     np.random.seed(value)
     torch.manual_seed(value)
+    torch.cuda.manual_seed_all(value)
     # torch.use_deterministic_algorithms(True)
     os.environ["PYTHONHASHSEED"] = str(value)
 
@@ -466,4 +467,12 @@ def get_nranks():
     return _NRANKS
   else:
     raise RuntimeError("Tried to get number of ranks, but not using distributed!")
+
+def barrier():
+  if not distributed():
+    return
+
+  torch.accelerator.synchronize()
+  _COMM.Barrier()
+  dist.barrier()
 

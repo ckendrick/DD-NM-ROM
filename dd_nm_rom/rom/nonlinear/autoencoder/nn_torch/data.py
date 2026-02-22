@@ -4,7 +4,7 @@ import torch.distributed as dist
 import torch.distributed.tensor as dtensor
 
 from dd_nm_rom import backend as bkd
-
+from dd_nm_rom.utils import parallel_print
 
 class Data(object):
 
@@ -38,25 +38,25 @@ class Data(object):
         self.global_size = np.sum(self._rank_sizes)
       self.global_size = bkd._COMM.bcast(self.global_size, root=0)
 
-      print("RANK {}:  Local snapshot matrix size = {}, global size = {}".format(bkd.get_rank(), self.local_size, self.global_size))
+      parallel_print("RANK {}:  Local snapshot matrix size = {}, global size = {}".format(bkd.get_rank(), self.local_size, self.global_size))
 
     # Normalization
-    self.normalize(self.snapshots, eps=eps)
+    #self.normalize(self.snapshots, eps=eps)
 
     # For distributed training, gather samples from all ranks, shuffle, then scatter back
     if bkd.distributed() and redistribute:
-      dist.barrier()
-      bkd._COMM.Barrier()
+      bkd.barrier()
 
       # gather full snapshot matrix
-      snapshots_all = self._gather_samples(self.snapshots, self._rank_sizes)
+      self.snapshots = self._gather_samples(self.snapshots, self._rank_sizes)
+
 
       # renormalize snapshots using entire matrix
       self.ref = torch.empty(self.snapshots.shape[-1], device=bkd.device())
       self.scale = torch.empty(self.snapshots.shape[-1], device=bkd.device())
 
       if bkd.get_rank() == 0:
-        self.normalize(snapshots_all, eps=eps)
+        self.normalize(self.snapshots, eps=eps)
 
       dist.broadcast(self.ref, src = 0)
       dist.broadcast(self.scale, src = 0)
@@ -66,12 +66,11 @@ class Data(object):
 
       # all ranks have full snapshot matrix:
       if bkd.get_rank() > 0:
-        snapshots_all = torch.empty((self.global_size, self.snapshots.shape[-1]), device=bkd.device())
-      dist.broadcast(snapshots_all, src=0)
-      dist.barrier()
-      bkd._COMM.Barrier()
+        self.snapshots = torch.empty((self.global_size, self.snapshots.shape[-1]), device=bkd.device())
 
-      self.snapshots = snapshots_all
+      bkd.barrier()
+      dist.broadcast(self.snapshots, src=0)
+      bkd.barrier()
 
     # Data
     self.train = None
@@ -92,8 +91,7 @@ class Data(object):
       if bkd.get_rank() == 0:
         self.split_train_valid(snapshots_all)
       
-      dist.barrier()
-      bkd._COMM.Barrier()
+      bkd.barrier()
       self.train = self._scatter_samples(self.train)
       self.valid = self._scatter_samples(self.valid)
 
@@ -108,7 +106,7 @@ class Data(object):
       train_size = 0
       valid_size = 0
       if bkd.get_rank() == 0:
-        self.split_train_valid(snapshots_all)
+        self.split_train_valid(self.snapshots)
 
         train_size = self.train.shape[0]
         valid_size = self.valid.shape[0]
@@ -116,8 +114,7 @@ class Data(object):
       train_size = bkd._COMM.bcast(train_size, 0)
       valid_size = bkd._COMM.bcast(valid_size, 0)
       
-      dist.barrier()
-      bkd._COMM.Barrier()
+      bkd.barrier()
 
       if bkd.get_rank() > 0:
         self.train = torch.empty((train_size, self.snapshots.shape[-1]), device=bkd.device())
@@ -128,10 +125,11 @@ class Data(object):
       #self.train = self._scatter_samples(self.train)
       #self.valid = self._scatter_samples(self.valid)
     else:
+      self.normalize(self.snapshots, eps=eps)
       self.split_train_valid(self.snapshots)
       self.batch_size = batch_size
 
-    print("RANK {}: data: snapshot size = {} batch size = {} train size = {} valid size = {}".format(self.rank, self.snapshots.shape, self.batch_size, self.train.shape, self.valid.shape))
+    parallel_print("RANK {}: data: snapshot size = {} batch size = {} train size = {} valid size = {}".format(self.rank, self.snapshots.shape, self.batch_size, self.train.shape, self.valid.shape))
     self._validate_sizes()
 
 
@@ -182,8 +180,7 @@ class Data(object):
       # shuffle on root rank using all data
       data_all = self.shuffle(data_all)
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
     data = self._scatter_samples(data_all, data)
 
@@ -199,7 +196,7 @@ class Data(object):
       return self.batch(data)
 
     g = torch.Generator(device=bkd.device())
-    g.manual_seed(0)
+    g.manual_seed(bkd.seed())
 
     i = torch.randperm(data.shape[0], generator=g)
     data[:,] = data[i]
@@ -219,13 +216,12 @@ class Data(object):
     #i = np.random.permutation(data.shape[0])
     g = torch.Generator(device=bkd.device())
     g.manual_seed(seed)
-    i = torch.randperm(data.shape[0], generator=g)    
+    i = torch.randperm(data.shape[0], generator=g)
     return data[i]
 
   def on_epoch_begin(self):
     if bkd.distributed():
-      dist.barrier()
-      bkd._COMM.Barrier()
+      bkd.barrier()
       self.batches = self.batch_dist(self.train)
       if (self.valid is not None):
         self.batches_valid = self.batch_dist(self.valid)
@@ -244,8 +240,7 @@ class Data(object):
     lsize = data.shape[0]
     rank_sizes = bkd._COMM.gather(lsize, root=0)
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
     return rank_sizes
 
@@ -285,8 +280,7 @@ class Data(object):
         bkd.finalize_distributed()
         bkd._COMM.Abort()
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
 
   def _gather_samples(self, data, data_sizes=None):
@@ -305,8 +299,7 @@ class Data(object):
       # if rank sizes is undefined on root rank, then we need to determine the sizes
       calc_sizes = True
     calc_sizes = bkd._COMM.bcast(calc_sizes, root=0)
-    dist.barrier()
-    bkd._COMM.Barrier() 
+    bkd.barrier()
 
     if calc_sizes:
       rank_sizes = self._get_snapshot_sizes(data)
@@ -315,20 +308,21 @@ class Data(object):
       snapshots = []
       for rank in range(bkd.get_nranks()):
         # NOTE: assumes data is 2D tensor, where the second dim is always constant across ranks (e.g domain size)
-        snapshots.append(torch.empty((rank_sizes[rank], data.shape[-1]), device=bkd.device()))
+        snapshots.append(torch.zeros_like(data, device=bkd.device()))
 
     dist.gather(data, snapshots, 0)
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
     if bkd.get_rank() == 0:
-      snapshots = torch.cat(snapshots)
+      snapshots = torch.vstack(snapshots)
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
-    return snapshots
+    if bkd.get_rank() == 0:
+      return snapshots
+    else:
+      return data
 
 
   def _scatter_samples(self, data, data_out=None):
@@ -354,13 +348,11 @@ class Data(object):
       out_size = full_size // bkd.get_nranks()
       data_out = torch.empty((out_size, self.snapshots.shape[-1]), device=bkd.device())
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
     dist.scatter(data_out, samples, 0)
 
-    dist.barrier()
-    bkd._COMM.Barrier()
+    bkd.barrier()
 
     return data_out
 
