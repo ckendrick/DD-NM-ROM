@@ -15,7 +15,7 @@ class Data(object):
     batch_size=32,
     eps=1e-5,
     tile=None,
-    redistribute=True
+    redistribute=False
   ):
     self.rank = 0
     if bkd.distributed():
@@ -24,12 +24,13 @@ class Data(object):
     self.snapshots = bkd.to_backend(snapshots)
 
     self.epoch = 0
-
-    self._rank_sizes = self._get_snapshot_sizes(self.snapshots)
+    self.redistribute = redistribute
 
     if tile is not None:
       # debugging option to extend snapshots
       self.snapshots = torch.tile(self.snapshots, (tile, 1))
+
+    self._rank_sizes = self._get_snapshot_sizes(self.snapshots)
 
     self.local_size = self.snapshots.shape[0]
     self.global_size = self.local_size
@@ -125,7 +126,10 @@ class Data(object):
       #self.train = self._scatter_samples(self.train)
       #self.valid = self._scatter_samples(self.valid)
     else:
-      self.normalize(self.snapshots, eps=eps)
+      if bkd.distributed() and not redistribute:
+        self.normalize_dist(self.snapshots, eps=eps)
+      else:
+        self.normalize(self.snapshots, eps=eps)
       self.split_train_valid(self.snapshots)
       self.batch_size = batch_size
 
@@ -137,6 +141,19 @@ class Data(object):
   def normalize(self, data, eps=1e-5):
     amin = torch.amin(data, dim=0)
     amax = torch.amax(data, dim=0)
+    ref, scale = 0.5*(amax+amin), 0.5*(amax-amin)
+    indices = torch.isclose(scale, torch.tensor(0.0), rtol=0.0, atol=eps)
+    scale[indices] = 1.0
+    self.ref = bkd.to_backend(ref)
+    self.scale = bkd.to_backend(scale)
+
+
+  def normalize_dist(self, data, eps=1e-5):
+    amin = torch.amin(data, dim=0)
+    amax = torch.amax(data, dim=0)
+    dist.all_reduce(amin, op=dist.ReduceOp.MIN)
+    dist.all_reduce(amax, op=dist.ReduceOp.MAX)
+    bkd.barrier()
     ref, scale = 0.5*(amax+amin), 0.5*(amax-amin)
     indices = torch.isclose(scale, torch.tensor(0.0), rtol=0.0, atol=eps)
     scale[indices] = 1.0
@@ -156,7 +173,7 @@ class Data(object):
   def batch(self, data):
     data[:,] = self.shuffle(data, seed=bkd.seed())
 
-    if bkd.distributed():
+    if bkd.distributed() and self.redistribute:
       data = torch.tensor_split(data, bkd.get_nranks(), dim=0)
       nb_samples = data[bkd.get_rank()].shape[0]
       nb_batches = int(np.ceil(nb_samples/self.batch_size))
@@ -220,7 +237,7 @@ class Data(object):
     return data[i]
 
   def on_epoch_begin(self):
-    if bkd.distributed():
+    if bkd.distributed() and self.redistribute:
       bkd.barrier()
       self.batches = self.batch_dist(self.train)
       if (self.valid is not None):

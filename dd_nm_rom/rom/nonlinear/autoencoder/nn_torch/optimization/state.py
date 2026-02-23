@@ -49,3 +49,4 @@ class TrainState(object):
         print(' '*4 + "rank {:d}: > Epoch execution time: {:.5e} s".format(self.rank, self.epoch_exec))
       else:
         print(' '*4 + "> Epoch execution time: {:.5e} s".format(self.epoch_exec))
+    bkd.barrier()

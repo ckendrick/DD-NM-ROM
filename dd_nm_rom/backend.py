@@ -448,6 +448,8 @@ def init_distributed():
 
 
 def finalize_distributed():
+  if not distributed():
+    return
   dist.destroy_process_group()
 
 

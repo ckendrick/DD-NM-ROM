@@ -57,11 +57,15 @@ class CallbackList(Callback):
 
   def on_epoch_begin(self):
     for callback in self.callbacks:
+      bkd.barrier()
       callback.on_epoch_begin()
+    bkd.barrier()
 
   def on_epoch_end(self):
     for callback in self.callbacks:
+      bkd.barrier()
       callback.on_epoch_end()
+    bkd.barrier()
 
   def on_batch_begin(self):
     for callback in self.callbacks:
