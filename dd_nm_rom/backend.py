@@ -3,11 +3,12 @@ import socket
 from mpi4py import MPI
 import torch
 import torch.distributed as dist
+from torch.distributed.tensor import DTensor, Shard, Replicate
 import random
 import numpy as np
 import scipy as sp
 
-from typing import Any, Union
+from typing import Any, Union, List
 
 
 # Global
@@ -19,6 +20,8 @@ _VALID_DTYPE = {"float32", "float64"}
 _COMM = None
 _RANK = None
 _NRANKS = None
+_DMESH = None
+_DEVICE_PER_RANK = 4
 
 # Setting
 # -------------------------------------
@@ -60,16 +63,19 @@ def set(
   :rtype: None
   """
   set_backend(backend)
+  set_device(device, device_idx, nb_threads)
+
   if is_torch_backend():
-    init_distributed()
+    init_distributed(device)
     # TODO: some schedulers handle binding automatically, so device_count will always=1
     if (_NRANKS > 1 and torch.accelerator.device_count() > 1):
       # TODO: fix this to work for multiple nodes!
       device_idx = _RANK % _NRANKS
       #print(" BACKEND: RANK {} reassigning device_idx to {}".format(_RANK, device_idx))
 
+    
   set_seed(seed)
-  set_device(device, device_idx, nb_threads)
+  #set_device(device, device_idx, nb_threads)
   set_floatx(floatx)
   set_epsilon(epsilon)
 
@@ -403,7 +409,7 @@ def is_torch_backend():
         return False
 
 
-def init_distributed():
+def init_distributed(backend_type="cuda"):
   global _COMM, _RANK, _NRANKS
   _COMM = MPI.COMM_WORLD
   _RANK = _COMM.Get_rank()
@@ -426,8 +432,9 @@ def init_distributed():
     # Use FLUX vars if available, else fallback to MPI
     world_size = int(os.environ.get('FLUX_JOB_SIZE', _NRANKS))
     rank_env = int(os.environ.get('FLUX_TASK_RANK', _RANK))
+    assert rank_env == _RANK
 
-    backend = "gloo" if get_backend() == "cpu" else "nccl"
+    backend = "gloo" if backend_type == "cpu" else "nccl"
 
     print("  Creating torch process group: world size = {} rank = {}, backend type = '{}'".format(world_size, rank_env, backend))
     print("   RANK {} number of available devices = {}".format(_RANK, torch.accelerator.device_count()))
@@ -439,12 +446,34 @@ def init_distributed():
         rank=rank_env,
         world_size=world_size
     )
+
+    init_device_mesh(backend_type, use_2d=False)
   else:
     print("Serial mode; no distributed!")
 
   print("   RANK {}: Initialized on device '{}'".format(_RANK, torch.cuda.get_device_name()))
   print("   RANK {}:   Device properties: {}".format(_RANK, torch.cuda.get_device_properties()))
 
+
+def init_device_mesh(backend_type, use_2d=True):
+  if not _BKD == "torch" or not distributed():
+    return
+
+  # fallback to 1D mesh if grid is not even
+  if _NRANKS % _DEVICE_PER_RANK != 0:
+    use_2d = False
+
+  if use_2d:
+    mesh = (_NRANKS // _DEVICE_PER_RANK, _DEVICE_PER_RANK)
+    dims = ("GLOBAL", "LOCAL")
+  else:
+    mesh = (_NRANKS,)
+    dims = ("GLOBAL",)
+
+  print("   RANK {}:   Initializing device mesh {} ({})".format(_RANK, mesh, dims))
+  global _DMESH
+  _DMESH = dist.init_device_mesh(backend_type, mesh_shape=mesh, mesh_dim_names=dims)
+  print("   RANK {}:   Initialized device mesh: {}".format(_RANK, _DMESH))
 
 
 def finalize_distributed():
@@ -599,3 +628,46 @@ def scatter_tensor(x, x_out=None, dim=0, root=0):
   return x_out
 
 
+def get_mesh():
+  return _DMESH
+
+
+# Methods for DTensor creation
+def to_sharded_dtensor(x: torch.Tensor,
+                       shape: List[int] = None,
+                       stride: List[int] = None) -> DTensor:
+  """
+  Creates a distributed tensor from each rank's local tensor x.
+  The returned distributed tensor is sharded across the current device mesh on dim 1,
+  so the DTensor represents a full tensor of x combined across all ranks.
+  """
+  if not distributed() or _DMESH is None:
+    return x
+
+  dtensor = DTensor.from_local(x,
+                               device_mesh=_DMESH,
+                               placements=[Shard(0)],
+                               shape=shape,
+                               stride=stride,
+                               run_check=False)
+  return dtensor
+
+
+def to_replica_dtensor(x: torch.Tensor,
+                       shape: List[int] = None,
+                       stride: List[int] = None) -> DTensor:
+  """
+  Creates a distributed tensor from each rank's local tensor x.
+  The returned distributed tensor is replicated across all ranks in the current device mesh on dim 1,
+  so the DTensor represents a full tensor of x combined across all ranks.
+  """
+  if not distributed() or _DMESH is None:
+    return x
+
+  dtensor = DTensor.from_local(x,
+                               device_mesh=_DMESH,
+                               placements=[Replicate()],
+                               shape=shape,
+                               stride=stride,
+                               run_check=False)
+  return dtensor

@@ -93,8 +93,8 @@ def test_gather_tensor_calc_sizes():
     x_local = torch.randn((local_size, 4), device=bkd.device())
 
     x_global = bkd.gather_tensor(x_local)
-    parallel_print(" RANK {}: x_local = {}".format(bkd.get_rank(), x_local))
-    parallel_print(" RANK {}: x_global (after gather) = {}".format(bkd.get_rank(), x_global))
+    #parallel_print(" RANK {}: x_local = {}".format(bkd.get_rank(), x_local))
+    #parallel_print(" RANK {}: x_global (after gather) = {}".format(bkd.get_rank(), x_global))
 
     assert x_global is not None
     if bkd.root():
@@ -110,10 +110,10 @@ def test_scatter_tensor_allocate():
     x = None
     if bkd.root():
         x = torch.randn((global_size, 4), device=bkd.device())
-        print(" ROOT x to scatter = {}".format(x))
+        #print(" ROOT x to scatter = {}".format(x))
 
     x_rank = bkd.scatter_tensor(x, x_out=None)
-    parallel_print(" RANK {}: x_rank = {}".format(bkd.get_rank(), x_rank))
+    #parallel_print(" RANK {}: x_rank = {}".format(bkd.get_rank(), x_rank))
     assert x_rank is not None
     assert x_rank.shape[0] == local_size
     assert x_rank.shape[1] == 4
@@ -123,3 +123,46 @@ def test_scatter_tensor_allocate():
     dist.broadcast(x, src=0)
     x = torch.tensor_split(x, bkd.get_nranks())
     torch.testing.assert_close(x[bkd.get_rank()], x_rank)
+
+
+@pytest.mark.mpi
+def test_create_shard_dtensor():
+    local_size = 2
+    global_size = local_size * bkd.get_nranks()
+
+    x_local = torch.full((local_size, 4), bkd.get_rank(), device=bkd.device(), dtype=bkd.floatx())
+    
+    x_global = torch.zeros((global_size, 4), device=bkd.device())
+    for rank in range(bkd.get_nranks()):
+        x_global[rank * local_size : (rank+1) * local_size,] = rank
+
+    dist_x = bkd.to_sharded_dtensor(x_local)
+
+    torch.testing.assert_close(dist_x.to_local(), x_local)
+    torch.testing.assert_close(dist_x.full_tensor(), x_global)
+
+
+@pytest.mark.mpi
+def test_create_replica_dtensor():
+    local_size = 2
+    global_size = local_size * bkd.get_nranks()
+
+    x_local = torch.full((local_size, 4), bkd.get_rank(), device=bkd.device(), dtype=bkd.floatx())
+    
+    x_global = torch.zeros((global_size, 4), device=bkd.device())
+    for rank in range(bkd.get_nranks()):
+        x_global[rank * local_size : (rank+1) * local_size,] = rank
+
+    dist_x = bkd.to_sharded_dtensor(x_local)
+
+    torch.testing.assert_close(dist_x.to_local(), x_local)
+    torch.testing.assert_close(dist_x.full_tensor(), x_global)
+
+    g = torch.Generator(device=bkd.device())
+    g.manual_seed(0)
+    i = torch.randperm(global_size, generator=g)
+    di = bkd.to_replica_dtensor(i)
+
+    xdi = dist_x[di]
+    torch.testing.assert_close(xdi.full_tensor(), x_global[i])
+
