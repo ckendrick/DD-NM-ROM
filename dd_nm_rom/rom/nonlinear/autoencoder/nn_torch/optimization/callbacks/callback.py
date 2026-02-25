@@ -1,3 +1,5 @@
+from dd_nm_rom import backend as bkd
+
 class Callback(object):
 
   def __init__(self):
@@ -57,13 +59,11 @@ class CallbackList(Callback):
 
   def on_epoch_begin(self):
     for callback in self.callbacks:
-      bkd.barrier()
       callback.on_epoch_begin()
     bkd.barrier()
 
   def on_epoch_end(self):
     for callback in self.callbacks:
-      bkd.barrier()
       callback.on_epoch_end()
     bkd.barrier()
 
