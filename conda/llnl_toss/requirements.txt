@@ -27,6 +27,8 @@ notebook
 numpy
 pydot
 pygments
+pytest
+pytest-mpi
 scipy
 silx
 wheel

@@ -478,3 +478,124 @@ def barrier():
   _COMM.Barrier()
   dist.barrier()
 
+
+def root():
+  if not distributed():
+    return True
+  return _RANK == 0
+
+
+# Parallel helpers:
+def get_local_sizes(data, dim=0, root=0):
+  """
+  Returns a list with the size of data (at the given dim) for each rank
+  Returned list is only defined on rank root, other ranks are undefined
+  """
+  lsize = data.shape[dim]
+  if not distributed():
+    return [lsize]
+
+  rank_sizes = _COMM.gather(lsize, root=root)
+  barrier()
+
+  return rank_sizes
+
+
+def get_local_sizes_all(data, dim=0):
+  """
+  All-node version of get_local_sizes (size of data returned for all ranks)
+  """
+  lsize = data.shape[dim]
+  if not distributed():
+    return [lsize]
+
+  rank_sizes = _COMM.allgather(lsize)
+  barrier()
+
+  return rank_sizes
+
+
+def gather_tensor(x, sizes=None, dim=0, root=0):
+  """
+  Gathers the local tensor x from each rank onto root rank.
+
+  If sizes is not provided, shape of each input x is determined. Otherwise,
+  sizes is a list of sizes over all ranks.
+
+  Rank local tensors x are assumed to be split over specified dim, so all other
+  dimensions are assumed the same size on all ranks.
+  """
+  if not distributed():
+    return x
+  
+  data = None
+
+  rank_sizes = sizes
+  calc_sizes = False
+  if rank_sizes is None and _RANK == root:
+    # if rank sizes is undefined on root rank, then we need to determine the sizes
+    calc_sizes = True
+  calc_sizes = _COMM.bcast(calc_sizes, root=root)
+  barrier()
+
+  if calc_sizes:
+    rank_sizes = get_local_sizes(x, dim, root)
+
+  if _RANK == root:
+    data = []
+    for rank in range(_NRANKS):
+      # check each rank has same size tensor (torch gather requires this)
+      assert rank_sizes[rank] == rank_sizes[0]
+      # NOTE: assumes data is 2D tensor, where the second dim is always constant across ranks (e.g domain size)
+      data.append(torch.zeros_like(x, device=device()))
+
+  dist.gather(x, data, root)
+
+  barrier()
+
+  if _RANK == root:
+    # Root rank stacks all gathered tensors
+    data = torch.cat(data, dim=dim)
+
+  barrier()
+
+  # Root rank returns combined tensor, all others just return input tensor
+  if _RANK == root:
+    return data
+  else:
+    return x
+
+
+def scatter_tensor(x, x_out=None, dim=0, root=0):
+  """
+  Scatters a distributed tensor x across all ranks (from source rank root) and returns result
+  Each rank gets 1/nranks portion of x tensor (along dim)
+  NOTE: assumes x is distributed across all ranks, and each rank must have same size
+  
+  If x_out=None, then result tensor will be allocated with size according to x.shape[dim] // nranks
+  NOTE: x_out will be overwritten by this operation
+  """
+  if not distributed():
+    return x
+
+  full_size = 0
+  data = None
+  if _RANK == root:
+    data = list(torch.tensor_split(x, _NRANKS, dim=dim))
+    full_size = x.shape[dim]
+    assert len(data) == _NRANKS
+    if x_out is None:
+      full_size = list(x.size())
+      full_size[dim] = x.shape[dim] // _NRANKS
+
+  if x_out is None:
+    full_size = _COMM.bcast(full_size, root=root)
+    x_out = torch.empty(full_size, device=device())
+
+  barrier()
+  dist.scatter(x_out, data, root)
+  barrier()
+
+  return x_out
+
+
