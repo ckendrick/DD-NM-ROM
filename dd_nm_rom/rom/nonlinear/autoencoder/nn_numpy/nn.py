@@ -2,9 +2,11 @@ import abc
 import copy
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 from dd_nm_rom.ops import sp_diag
 from dd_nm_rom.rom.utils import hyper_red as hr
+import dd_nm_rom.backend as bkd
 
 from . import activation as act_mod
 
@@ -35,6 +37,26 @@ class Block(object):
     self._w["ov_scale"] = 1.0/self.config["scale"]
     for k in ("scale", "ov_scale"):
       self._w[k+"_diag"] = sp_diag(self._w[k])
+
+    # TODO: fix this
+    if bkd.is_torch_backend():
+      w_torch = {}
+      for (k, b) in self._w.items():
+        if isinstance(b, np.ndarray):
+          b = bkd.to_backend(b)
+          w_torch[k] = b
+        elif isinstance(b, sp.spmatrix):
+          if sp.isspmatrix_csr(b):
+            b = bkd.to_sp_backend(b)
+            w_torch[k] = b
+          else:
+            b = bkd.to_sp_backend(bkd.to_sparse(b))
+            w_torch[k] = b
+        elif isinstance(b, torch.Tensor):
+          w_torch[k] = b
+        else:
+          raise RuntimeError("Unexpected type for key {}: type = {}, {}".format(k, type(b), b))
+      self._w = w_torch
 
   def __call__(self, x, with_jac=True):
     return self.fun_jac(x) if with_jac else self.fun(x)
@@ -109,6 +131,25 @@ class Decoder(Block):
     else:
       self.w = self._w
       self.activation = self._activation
+
+    if bkd.is_torch_backend():
+      w_torch = {}
+      for (k, b) in self.w.items():
+        if isinstance(b, np.ndarray):
+          b = bkd.to_backend(b)
+          w_torch[k] = b
+        elif isinstance(b, sp.spmatrix):
+          if sp.isspmatrix_csr(b):
+            b = bkd.to_sp_backend(b)
+            w_torch[k] = b
+          else:
+            b = bkd.to_sp_backend(bkd.to_sparse(b))
+            w_torch[k] = b
+        elif isinstance(b, torch.Tensor):
+          w_torch[k] = b
+        else:
+          raise RuntimeError("Unexpected type for key {}: type = {}, {}".format(k, type(b), b))
+      self.w = w_torch
 
   def set_weights_act_hr(
     self,
@@ -233,9 +274,20 @@ class MultiAutoencoder(Autoencoder):
         for (act, indices) in cfg["activation"]["masks"].items():
           cfg["activation"]["masks"][act] = np.sort(np.concatenate(indices))
       # Assemble weights
-      cfg["weights"]["W1"] = sp.vstack(cfg["weights"]["W1"])
-      cfg["weights"]["W2"] = sp.hstack(cfg["weights"]["W2"])
-      cfg["weights"]["b1"] = np.concatenate(cfg["weights"]["b1"])
+      if bkd.is_torch_backend():
+        stack = cfg["weights"]["W1"][0].to_dense()
+        for spw in range(1, len(cfg["weights"]["W1"])):
+          stack = torch.vstack((stack, cfg["weights"]["W1"][spw].to_dense()))
+        cfg["weights"]["W1"] = bkd.to_sp_backend(stack)
+        stack = cfg["weights"]["W2"][0].to_dense()
+        for spw in range(1, len(cfg["weights"]["W2"])):
+          stack = torch.hstack((stack, cfg["weights"]["W2"][spw].to_dense()))
+        cfg["weights"]["W2"] = bkd.to_sp_backend(stack)
+        cfg["weights"]["b1"] = torch.cat(cfg["weights"]["b1"])
+      else:
+        cfg["weights"]["W1"] = sp.vstack(cfg["weights"]["W1"])
+        cfg["weights"]["W2"] = sp.hstack(cfg["weights"]["W2"])
+        cfg["weights"]["b1"] = np.concatenate(cfg["weights"]["b1"])
       # Store configuration
       config[l] = cfg
     return config
@@ -259,8 +311,8 @@ class MultiAutoencoder(Autoencoder):
       "input_dim": self.input_dim,
       "latent_dim": latent_dim,
       "activation": activation,
-      "ref": np.zeros(self.input_dim),
-      "scale": np.ones(self.input_dim),
+      "ref": torch.zeros(self.input_dim) if bkd.is_torch_backend() else np.zeros(self.input_dim),
+      "scale": torch.ones(self.input_dim) if bkd.is_torch_backend() else np.ones(self.input_dim),
       "mask_shape": None,
       "mask_indices": None,
       "weights": {w: [] for w in ("W1", "b1", "W2")}
@@ -296,14 +348,24 @@ class MultiAutoencoder(Autoencoder):
     indices
   ):
     # Input layer
+    if bkd.is_torch_backend():
+      W1 = torch.zeros((dims["hidden"], dims["input"]))
+      W1[:,indices["fom"]] += layer._w["W1_scale"]
+      W1 = bkd.to_sp_backend(W1)
+      # Hidden layer
+      W2 = torch.zeros((dims["latent"], dims["hidden"]))
+      W2[indices["rom"],:] += layer._w["W2"]
+      W2 = bkd.to_sp_backend(W2)
+    else:
+      W1 = np.zeros((dims["hidden"], dims["input"]))
+      W1[:,indices["fom"]] += layer._w["W1_scale"]
+      W1 = sp.csr_matrix(W1)
+      # Hidden layer
+      W2 = np.zeros((dims["latent"], dims["hidden"]))
+      W2[indices["rom"],:] += layer._w["W2"]
+      W2 = sp.csr_matrix(W2)
+
     b1 = layer._w["b1_ref"]
-    W1 = np.zeros((dims["hidden"], dims["input"]))
-    W1[:,indices["fom"]] += layer._w["W1_scale"]
-    W1 = sp.csr_matrix(W1)
-    # Hidden layer
-    W2 = np.zeros((dims["latent"], dims["hidden"]))
-    W2[indices["rom"],:] += layer._w["W2"]
-    W2 = sp.csr_matrix(W2)
     # Return weights
     return {"W1": W1, "b1": b1, "W2": W2}
 
@@ -315,12 +377,21 @@ class MultiAutoencoder(Autoencoder):
   ):
     # Input layer
     b1 = layer._w["b1"]
-    W1 = np.zeros((dims["hidden"], dims["latent"]))
-    W1[:,indices["rom"]] += layer._w["W1"]
-    W1 = sp.csr_matrix(W1)
-    # Hidden layer
-    W2 = np.zeros((dims["input"], dims["hidden"]))
-    W2[indices["fom"],:] += layer._w["scale_W2"]
-    W2 = sp.csr_matrix(W2)
+    if bkd.is_torch_backend():
+      W1 = torch.zeros((dims["hidden"], dims["latent"]))
+      W1[:,indices["rom"]] += layer._w["W1"]
+      W1 = bkd.to_sp_backend(W1)
+      # Hidden layer
+      W2 = torch.zeros((dims["input"], dims["hidden"]))
+      W2[indices["fom"],:] += layer._w["scale_W2"]
+      W2 = bkd.to_sp_backend(W2)
+    else:
+      W1 = np.zeros((dims["hidden"], dims["latent"]))
+      W1[:,indices["rom"]] += layer._w["W1"]
+      W1 = sp.csr_matrix(W1)
+      # Hidden layer
+      W2 = np.zeros((dims["input"], dims["hidden"]))
+      W2[indices["fom"],:] += layer._w["scale_W2"]
+      W2 = sp.csr_matrix(W2)
     # Return weights
     return {"W1": W1, "b1": b1, "W2": W2}

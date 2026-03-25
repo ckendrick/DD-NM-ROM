@@ -2,14 +2,23 @@ import abc
 import copy
 import numpy as np
 
+import torch
+from torch.nn import functional
+from torch.func import jacrev
+
 from dd_nm_rom.ops import sp_diag
+from dd_nm_rom import backend as bkd
 
 
 _ACT_IDS = ("elu", "linear", "mixed", "relu", "sigmoid", "swish", "softplus")
 
 def get(identifier='sigmoid', *args, **kwargs):
   if (isinstance(identifier, str) and (identifier.lower() in _ACT_IDS)):
-    return {
+    if bkd.is_torch_backend():
+      BaseAct.__call__ = BaseAct._call__torch
+      BaseAct._fun = BaseAct._fun_torch
+      BaseAct._jac = BaseAct._jac_torch
+    act = {
       "elu":     ELU,
       "linear":  Linear,
       "mixed":   Mixed,
@@ -18,6 +27,12 @@ def get(identifier='sigmoid', *args, **kwargs):
       "swish":   Swish,
       "softplus": Softplus
     }[identifier.lower()](*args, **kwargs)
+    if bkd.is_torch_backend():
+        act._fun = act._fun_torch
+        act._jac = act._jac_torch
+        act.fun = act._fun_torch
+        act.jac = act._jac_torch
+    return act
   else:
     raise ValueError(
       f"Could not interpret activation function identifier: '{identifier}'."
@@ -34,6 +49,12 @@ class BaseAct(object):
   def __call__(self, x, with_jac=True):
     return (self.fun(x), self.jac(x)) if with_jac else self.fun(x)
 
+  def _call__torch(self, x, with_jac=True):
+    if with_jac:
+      return (self.fun(x), self.jac(x))
+    else:
+      return self.fun(x)
+
   @abc.abstractmethod
   def _fun(self, x):
     pass
@@ -41,6 +62,17 @@ class BaseAct(object):
   @abc.abstractmethod
   def _jac(self, x):
     pass
+
+  @abc.abstractmethod
+  def _fun_torch(self, x):
+    pass
+
+  def _jac_torch(self, x):
+    return jacrev(self._fun_torch)(x)
+
+  def _fun_jac(self, x):
+    result = self._fun_torch(x)
+    return result, result
 
 # Linear
 # -------------------------------------
@@ -51,6 +83,10 @@ class Linear(BaseAct):
 
   def _jac(self, x):
     return np.ones_like(x)
+
+  def _fun_torch(self, x):
+    return x
+
 
 # Sigmoid
 # -------------------------------------
@@ -125,6 +161,12 @@ class Mixed(BaseAct):
       y[mask] = act._jac(x[mask])
     return y
 
+  def _fun_torch(self, x):
+    y = torch.clone(x)
+    for (act, mask) in self.masks.values():
+      y[mask] = act._fun(x[mask])
+    return y
+
 # Softplus
 # -------------------------------------
 class Softplus(BaseAct):
@@ -141,4 +183,8 @@ class Softplus(BaseAct):
 
   def _jac(self, x):
     # f'(x) = sigmoid(x); use tanh formulation for stability
-    return 0.5 * (1.0 + np.tanh(0.5 * x))    
+    return 0.5 * (1.0 + np.tanh(0.5 * x))
+
+  def _fun_torch(self, x):
+    return functional.softplus(x)
+

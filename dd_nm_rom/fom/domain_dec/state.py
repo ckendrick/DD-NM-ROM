@@ -45,6 +45,8 @@ class SubdomainElementState(object):
     for (op_k, op_v) in self.monolithic.ops.items():
       op_v = bkd.torch_csr_to_scipy(op_v)
       self.ops[op_k] = op_v[self.submat]
+      if bkd.is_torch_backend():
+        self.ops[op_k] = bkd.to_sp_backend(self.ops[op_k])
     # Boundary conditions
     self.bc_f = ops.map_nested_dict(
       self.monolithic.bc_f, lambda x: x[self.nodes_res]

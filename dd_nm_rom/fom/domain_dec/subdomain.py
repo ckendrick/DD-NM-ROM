@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 from dd_nm_rom import ops
 from dd_nm_rom import backend as bkd
@@ -162,10 +163,18 @@ class Subdomain(object):
                     vel_field = "u" if op_k == "Ax" else "v"
                     vel = uv["res"][vel_field]
 
-                    pos_mask = (vel >= 0).astype(float)
-                    neg_mask = 1-pos_mask #(vel < 0)
-                    P = sp.diags(pos_mask)  # shape (n, n)
-                    N = sp.diags(neg_mask)  # shape (n, n)
+                    if bkd.is_torch_backend():
+                        pos_mask = vel.ge(0.0)
+                        neg_mask = ~pos_mask
+
+                        # Diagonal selection matrices
+                        P = torch.sparse.spdiags(torch.where(vel >= 0.0, 1.0, 0.0).cpu(), torch.tensor([0]).cpu(), shape=(vel.size(0), vel.size(0)), layout=torch.sparse_csr).cuda() # shape (n, n)
+                        N = torch.sparse.spdiags(torch.where(vel < 0.0, 1.0, 0.0).cpu(), torch.tensor([0]).cpu(), shape=(vel.size(0), vel.size(0)), layout=torch.sparse_csr).cuda()  # shape (n, n)
+                    else:
+                        pos_mask = (vel >= 0).astype(float)
+                        neg_mask = 1-pos_mask #(vel < 0)
+                        P = sp.diags(pos_mask)  # shape (n, n)
+                        N = sp.diags(neg_mask)  # shape (n, n)
 
                     A_pos = elem_states[e_k].ops[f"{op_k}_pos"]
                     A_neg = elem_states[e_k].ops[f"{op_k}_neg"]
@@ -178,6 +187,8 @@ class Subdomain(object):
                     # Standard case
                     if isinstance(op_i, dict):
                         op_i = op_i[x_k]
+                    if bkd.is_torch_backend():
+                        op_i = bkd.to_sp_backend(op_i)
                     op_v += op_i @ uv[e_k][x_k]
 
             ops_uv[x_k][op_k] = op_v
@@ -204,7 +215,10 @@ class Subdomain(object):
         x_kk = x_k if (x_k in uv["res"].keys()) else x_k+"_"+x_k
         res[x_k] = uv["res"][x_kk] - uv_old["res"][x_kk] - dt * res[x_k]
     # Return
-    return np.concatenate([res[x_k] for x_k in ("u", "v")])
+    if bkd.is_torch_backend():
+      return torch.cat([res[x_k] for x_k in ("u", "v")])
+    else:
+      return np.concatenate([res[x_k] for x_k in ("u", "v")])
 
   def _compute_res(
     self,
@@ -224,6 +238,10 @@ class Subdomain(object):
       if class_name == 'DDPoisson2D':
         dx[x_k] = ops_uv[x_k]["D"] + bc_f[x_k]["D"] - force["res"][x_k]
       else:
+        bc_f[x_k]["A"]["x"] = bkd.to_backend(bc_f[x_k]["A"]["x"])
+        bc_f[x_k]["A"]["y"] = bkd.to_backend(bc_f[x_k]["A"]["y"])
+        bc_f[x_k]["D"] = bkd.to_backend(bc_f[x_k]["D"])
+
         adv_act_x = ops_uv[x_k]["Ax"] - bc_f[x_k]["A"]["x"]
         adv_act_y = ops_uv[x_k]["Ay"] - bc_f[x_k]["A"]["y"]
         dx[x_k] = ops.sp_diag(u) @ adv_act_x \
@@ -247,7 +265,10 @@ class Subdomain(object):
     # Backward Euler for integration
     if (not steady):
       for e_k in ("interior", "interface"):
-        jac[e_k] = elem_states[e_k].iden_uv - dt * jac[e_k]
+        if bkd.is_torch_backend():
+          jac[e_k] = elem_states[e_k].iden_uv.to_dense() - bkd.to_backend(dt) * jac[e_k].to_sparse_coo()
+        else:
+          jac[e_k] = elem_states[e_k].iden_uv - dt * jac[e_k]
     # Return
     return jac
 
@@ -290,10 +311,18 @@ class Subdomain(object):
           # --- Blend compact upwind operators based on local velocity ---
           for op_k, vel_field in zip(("Ax", "Ay"), ("u", "v")):
               vel = uv["res"][vel_field]
-              pos_mask = (vel >= 0).astype(float)
-              neg_mask = 1.0 - pos_mask
-              P = sp.diags(pos_mask)
-              N = sp.diags(neg_mask)
+              if bkd.is_torch_backend():
+                pos_mask = vel.ge(0.0)
+                neg_mask = ~pos_mask
+
+                # Diagonal selection matrices
+                P = torch.sparse.spdiags(torch.where(vel >= 0.0, 1.0, 0.0).cpu(), torch.tensor([0]).cpu(), shape=(vel.size(0), vel.size(0)), layout=torch.sparse_csr).cuda() # shape (n, n)
+                N = torch.sparse.spdiags(torch.where(vel < 0.0, 1.0, 0.0).cpu(), torch.tensor([0]).cpu(), shape=(vel.size(0), vel.size(0)), layout=torch.sparse_csr).cuda()  # shape (n, n)
+              else:
+                pos_mask = (vel >= 0).astype(float)
+                neg_mask = 1.0 - pos_mask
+                P = sp.diags(pos_mask)
+                N = sp.diags(neg_mask)
 
               A_pos = state_k.ops[f"{op_k}_pos"]
               A_neg = state_k.ops[f"{op_k}_neg"]
@@ -308,10 +337,11 @@ class Subdomain(object):
         jac_vu_k = jac_vu @ state_k.iden
         jac_vv_k = jac_vv @ state_k.iden + jac_xx_k
         jac[e_k] = sp.bmat(
-          [[jac_uu_k, jac_uv_k],
-          [jac_vu_k, jac_vv_k]],
+          [[bkd.torch_csr_to_scipy(jac_uu_k), bkd.torch_csr_to_scipy(jac_uv_k)],
+          [bkd.torch_csr_to_scipy(jac_vu_k), bkd.torch_csr_to_scipy(jac_vv_k)]],
           format="csr"
         )
+        jac[e_k] = bkd.to_sp_backend(jac[e_k])
     return jac
 
   # Residual/Jacobian - Constraints
@@ -336,16 +366,44 @@ class Subdomain(object):
     scaling: float
   ) -> dtypes.KKT_TYPE:
     # To sparse
-    jac = ops.map_nested_dict(jac, bkd.to_sparse)
-    cjac = ops.map_nested_dict(cjac, bkd.to_sparse)
+    if bkd.is_torch_backend():
+      jac = ops.map_nested_dict(jac, bkd.to_sp_backend)
+      cjac = ops.map_nested_dict(cjac, bkd.to_sp_backend)
+    else:
+      jac = ops.map_nested_dict(jac, bkd.to_sparse)
+      cjac = ops.map_nested_dict(cjac, bkd.to_sparse)
+    cat_func = torch.cat if bkd.is_torch_backend() else np.concatenate
+    hstack_f = torch.hstack if bkd.is_torch_backend() else sp.hstack
+
     # Residual
-    res = np.concatenate([
-      scaling*(jac["interior"].T@res),
-      scaling*(jac["interface"].T@res) + cjac["interface"].T@lambdas
-    ])
-    # Constraints
-    cjac = sp.hstack([cjac["interior"], cjac["interface"]])
-    # Hessian
-    jac = sp.hstack([jac["interior"], jac["interface"]])
-    hess = scaling*(jac.T@jac)
+    if bkd.is_torch_backend():
+      # .T operator does not work for sparse tensors
+      interior_t = torch.t(jac["interior"])
+      interface_t = torch.t(jac["interface"])
+      cjac_interface_t = torch.t(cjac["interface"])
+      res = cat_func([
+        scaling*(interior_t@res),
+        scaling*(interface_t@res) + cjac_interface_t@lambdas
+      ])
+    else:
+      res = cat_func([
+        scaling*(jac["interior"].T@res),
+        scaling*(jac["interface"].T@res) + cjac["interface"].T@lambdas
+      ])
+    if bkd.is_torch_backend():
+      # Constraints
+      cjac = hstack_f([cjac["interior"].to_sparse_coo(), cjac["interface"].to_sparse_coo()])
+      # Hessian
+      jac = hstack_f([jac["interior"].to_sparse_coo(), jac["interface"].to_sparse_coo()])
+      hess = scaling*(torch.t(jac)@jac)
+
+      cjac = cjac.to_sparse_csr()
+      jac = jac.to_sparse_csr()
+      hess = hess.to_sparse_csr()
+    else:
+      # Constraints
+      cjac = hstack_f([cjac["interior"], cjac["interface"]])
+      # Hessian
+      jac = hstack_f([jac["interior"], jac["interface"]])
+      hess = scaling*(jac.T@jac)
     return res, cres, hess, cjac

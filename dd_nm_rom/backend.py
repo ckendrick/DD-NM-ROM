@@ -37,25 +37,25 @@ def set(
   """
   Configure the settings for the computational backend.
 
-  This function sets up various parameters for the backend environment, 
-  including the computational backend, device, number of threads, and 
+  This function sets up various parameters for the backend environment,
+  including the computational backend, device, number of threads, and
   precision settings.
 
   :param backend: The computational backend to use (e.g., "numpy").
   :type backend: str
   :param device: The device to use (e.g., "cpu").
   :type device: str
-  :param device_idx: The index of the device to use (e.g., 0 for the 
+  :param device_idx: The index of the device to use (e.g., 0 for the
                      first device).
   :type device_idx: int
   :param nb_threads: The number of threads to use.
   :type nb_threads: int
-  :param epsilon: A small value to avoid numerical instability. If None, 
+  :param epsilon: A small value to avoid numerical instability. If None,
                   a default value is used.
   :type epsilon: float or None
   :param floatx: The floating-point precision to use (e.g., "float64").
   :type floatx: str
-  :param seed: The seed for random number generation. If None, the seed 
+  :param seed: The seed for random number generation. If None, the seed
                is not set.
   :type seed: int or None
 
@@ -73,7 +73,7 @@ def set(
       device_idx = _RANK % _NRANKS
       #print(" BACKEND: RANK {} reassigning device_idx to {}".format(_RANK, device_idx))
 
-    
+
   set_seed(seed)
   #set_device(device, device_idx, nb_threads)
   set_floatx(floatx)
@@ -97,7 +97,7 @@ def set_backend(
   :param value: The backend to be set.
   :type value: str
 
-  :raises ValueError: If the provided backend is not in the list of valid 
+  :raises ValueError: If the provided backend is not in the list of valid
                       backends.
   """
   global _BKD
@@ -113,17 +113,17 @@ def to_numpy(x: Any) -> np.ndarray:
   """
   Convert the input to a NumPy array.
 
-  If the input is already a NumPy array, it is returned as-is. If the input 
-  is a PyTorch tensor, it is converted to a NumPy array. For other types 
-  such as `int`, `float`, `list`, or `tuple`, the input is converted to a NumPy 
-  array with a `float` data type. If the input does not match any of these 
+  If the input is already a NumPy array, it is returned as-is. If the input
+  is a PyTorch tensor, it is converted to a NumPy array. For other types
+  such as `int`, `float`, `list`, or `tuple`, the input is converted to a NumPy
+  array with a `float` data type. If the input does not match any of these
   types, it is returned unchanged.
 
-  :param x: The input to convert to a NumPy array. Can be a NumPy array, 
+  :param x: The input to convert to a NumPy array. Can be a NumPy array,
             PyTorch tensor, int, float, list, or tuple.
   :type x: Any
 
-  :return: The converted NumPy array or the original input if it cannot be 
+  :return: The converted NumPy array or the original input if it cannot be
            converted.
   :rtype: np.ndarray or Any
   """
@@ -141,14 +141,14 @@ def to_backend(x: Any) -> Union[np.ndarray, torch.Tensor]:
   """
   Convert input to a backend-specific format.
 
-  If the backend is set to "torch" and the input `x` is not already a 
-  PyTorch tensor, it converts `x` to a PyTorch tensor. If the backend is 
+  If the backend is set to "torch" and the input `x` is not already a
+  PyTorch tensor, it converts `x` to a PyTorch tensor. If the backend is
   not "torch", it converts `x` to a NumPy array.
 
   :param x: The input to be converted.
   :type x: Any
 
-  :return: The input converted to the appropriate format based on the 
+  :return: The input converted to the appropriate format based on the
            backend setting.
   :rtype: Union[np.ndarray, torch.Tensor]
   """
@@ -165,11 +165,11 @@ def to_sparse(
   x: Union[np.ndarray, sp.sparse.spmatrix]
 ) -> sp.sparse.spmatrix:
   """
-  Convert the input array or sparse matrix to a Compressed Sparse Row (CSR) 
+  Convert the input array or sparse matrix to a Compressed Sparse Row (CSR)
   matrix.
 
-  If the input `x` is already a sparse matrix, it will be converted to CSR 
-  format. If `x` is a dense NumPy array, it will be converted to a CSR sparse 
+  If the input `x` is already a sparse matrix, it will be converted to CSR
+  format. If `x` is a dense NumPy array, it will be converted to a CSR sparse
   matrix.
 
   :param x: The input array or sparse matrix to convert.
@@ -192,9 +192,61 @@ def to_sp_backend(x: sp.sparse.spmatrix) -> torch.Tensor:
         else:
             return x
 
+
+def to_sp_coo_backend(x: sp.sparse.spmatrix) -> torch.Tensor:
+    """
+    Converts a scipy sparse matrix in COO to torch sparse COO
+    This routine constructs the torch tensor using the direct data pointers from scipy,
+    avoiding additional memory copies and object creation overhead
+
+    If backend is not torch, then the original matrix is returned
+    """
+    if (x is not None):
+        if (_BKD == "torch"):
+            if torch.is_tensor(x):
+                return x.to_sparse_coo().cuda()
+            else:
+                row = x.row
+                col = x.col
+                xcoo = torch.sparse_coo_tensor(torch.tensor(np.vstack((row, col))), x.data, size=x.shape)
+                return xcoo
+        else:
+            return x
+
+
 def torch_csr_to_scipy(x: torch.Tensor) -> sp.sparse.spmatrix:
-    if not torch.is_tensor(x): return x
-    return sp.sparse.csr_matrix((x.values().cpu(), x.col_indices().cpu(), x.crow_indices().cpu()), shape=(x.shape[0], x.shape[1]))
+    if torch.is_tensor(x):
+        return sp.sparse.csr_matrix((x.values().cpu(), x.col_indices().cpu(), x.crow_indices().cpu()), shape=(x.shape[0], x.shape[1]))
+    elif isinstance(x, List):
+        for i in range(len(x)):
+            x[i] = sp.sparse.csr_matrix((x[i].values().cpu(), x[i].col_indices().cpu(), x[i].crow_indices().cpu()), shape=(x[i].shape[0], x[i].shape[1]))
+        return x
+    else:
+        return x
+
+
+def torch_hstack(x: Union[List, torch.Tensor]) -> torch.Tensor:
+    # helper function around torch.hstack for CSR tensors
+    # this converts x to COO, since hstack does not work with CSR tensors
+    # after the hstack, returns x back in a CSR tensor
+    if isinstance(x, List):
+        for i in range(len(x)):
+            x[i] = x[i].to_sparse_coo()
+        x = torch.hstack(x)
+        return x.to_sparse_csr()
+    else:
+        return torch.hstack(x.to_sparse_coo()).to_sparse_csr()
+
+
+def torch_bmat(x: List) -> torch.Tensor:
+    for i in range(len(x)):
+      for j in range(len(x[i])):
+        if x[i][j] is None:
+          continue
+        x[i][j] = torch_csr_to_scipy(x[i][j].to_sparse_csr())
+    x = sp.sparse.bmat(x, format="csr")
+    return to_sp_backend(x)
+
 
 # Device
 # -------------------------------------
@@ -215,10 +267,10 @@ def set_device(
   """
   Set the device for computations.
 
-  This function sets the global device for PyTorch operations and configures 
+  This function sets the global device for PyTorch operations and configures
   the number of threads for operations.
 
-  :param value: The device to set (e.g., "cpu", "cuda"). If None or "cuda", 
+  :param value: The device to set (e.g., "cpu", "cuda"). If None or "cuda",
                 the function will select "cuda" if available, otherwise "cpu".
   :type value: str, optional
   :param index: The device index, default is 0.
@@ -253,11 +305,11 @@ def set_device(
 # -------------------------------------
 def machine_eps() -> float:
   """
-  Returns the machine epsilon for the floating-point precision defined 
+  Returns the machine epsilon for the floating-point precision defined
   by `_FLOATX`.
 
-  Machine epsilon is the smallest positive number :math:`\epsilon` such that 
-  :math:`1.0 + \epsilon \neq 1.0`. This function returns the machine epsilon 
+  Machine epsilon is the smallest positive number :math:`\epsilon` such that
+  :math:`1.0 + \epsilon \neq 1.0`. This function returns the machine epsilon
   for the data type specified by the global variable `_FLOATX`.
 
   :return: Machine epsilon for the specified floating-point precision.
@@ -339,8 +391,8 @@ def set_floatx(
   """
   Set the global floating-point precision type for the library.
 
-  This function sets the global floating-point precision type (`_FLOATX`) to 
-  the specified value. If the value is not in the list of valid data types, 
+  This function sets the global floating-point precision type (`_FLOATX`) to
+  the specified value. If the value is not in the list of valid data types,
   it raises a `ValueError`. Additionally, it tries to set the default floating-
   point dtype in PyTorch.
 
@@ -380,9 +432,9 @@ def set_seed(
   """
   Set random number generator seeds for reproducibility.
 
-  This function sets the seed for Python"s built-in random module, NumPy, 
-  and PyTorch, ensuring deterministic operations. It"s essential for 
-  achieving reproducible results in data processing and machine learning 
+  This function sets the seed for Python"s built-in random module, NumPy,
+  and PyTorch, ensuring deterministic operations. It"s essential for
+  achieving reproducible results in data processing and machine learning
   tasks. If `value` is provided, all random generators will use the same seed.
 
   :param value: An integer seed for random number generators.
@@ -556,7 +608,7 @@ def gather_tensor(x, sizes=None, dim=0, root=0):
   """
   if not distributed():
     return x
-  
+
   data = None
 
   rank_sizes = sizes
@@ -600,7 +652,7 @@ def scatter_tensor(x, x_out=None, dim=0, root=0):
   Scatters a distributed tensor x across all ranks (from source rank root) and returns result
   Each rank gets 1/nranks portion of x tensor (along dim)
   NOTE: assumes x is distributed across all ranks, and each rank must have same size
-  
+
   If x_out=None, then result tensor will be allocated with size according to x.shape[dim] // nranks
   NOTE: x_out will be overwritten by this operation
   """

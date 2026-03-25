@@ -1,8 +1,10 @@
 import copy
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 from dd_nm_rom import ops
+from dd_nm_rom import backend as bkd
 from dd_nm_rom.rom.utils import hyper_red as hr_mod
 
 from .state import SubdomainElementStateROM
@@ -44,6 +46,12 @@ class SubdomainROM(object):
     # Compose null matrix for interior
     for k in ("interior",):
       self.cmat[k] = self.cmat[k][:,:self.rom_dim[k]]
+
+    if bkd.is_torch_backend():
+      keys = self.cmat.keys()
+      for i in keys:
+        self.cmat[i] = bkd.to_sp_backend(self.cmat[i])
+
     # Hyper-reduction (HR)
     # -------------
     self.set_res_bases(res_bases)
@@ -245,7 +253,12 @@ class SubdomainROM(object):
     dec_jac
   ):
     celem = "interface"
-    cjac = copy.deepcopy(self.cmat)
+    if bkd.is_torch_backend():
+      cjac = {}
+      cjac[celem] = torch.clone(self.cmat[celem])
+      cjac["interior"] = torch.clone(self.cmat["interior"])
+    else:
+      cjac = copy.deepcopy(self.cmat)
     cstate = self.elem_states[celem]
     if (self.constraint_type == "weak"):
       if (self.hr_active):

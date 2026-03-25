@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.sparse as sp
+import torch
 
 from time import time
 from dd_nm_rom import ops
@@ -271,7 +272,7 @@ class DDBurgers2D(object):
     if map_on_res:
       uv["res"] = {}
       for x_k in ("u", "v"):
-        uv["res"][x_k] = np.zeros(shape)
+        uv["res"][x_k] = torch.zeros(shape) if bkd.is_torch_backend() else np.zeros(shape)
     return uv
 
   def extract_uv_sub_from_vec(
@@ -316,17 +317,29 @@ class DDBurgers2D(object):
   ) -> dtypes.RES_JAC_TYPE:
     # > Residual
     res.append(cres)
-    res = np.concatenate(res)
-    # > Constraints Jacobian
-    cjac = sp.hstack(cjac)
-    # > Hessians
-    hess = sp.block_diag(hess)
-    # > Full Jacobian
-    jac = sp.bmat(
-      [[hess, cjac.T],
-       [cjac,   None]],
-      format="csr"
-    )
+    if bkd.is_torch_backend():
+        res = torch.cat(res)
+        # > Constraints Jacobian
+        cjac = bkd.torch_hstack(cjac)
+
+        # > Hessians
+        hess = sp.block_diag(bkd.torch_csr_to_scipy(hess))
+        hess = bkd.to_sp_coo_backend(hess)
+        hess = hess.coalesce().to_sparse_csr()
+
+        # > Full Jacobian
+        jac = bkd.torch_bmat([[hess, torch.t(cjac)],
+                              [cjac,   None]])
+    else:
+        res = np.concatenate(res)
+        # > Constraints Jacobian
+        cjac = sp.hstack(cjac)
+        # > Hessians
+        hess = sp.block_diag(hess)
+        # > Full Jacobian
+        jac = sp.bmat([[hess, cjac.T],
+                       [cjac,   None]],
+                       format="csr")
     return res, jac
 
   # Solving

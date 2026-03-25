@@ -4,7 +4,7 @@ import scipy as sp
 import torch.sparse
 
 from typing import Any, Dict, List
-
+from dd_nm_rom import backend as bkd
 
 def sp_diag(
   x: np.ndarray
@@ -26,7 +26,7 @@ def sp_diag(
   if isinstance(x, np.ndarray):
     return sp.sparse.spdiags(x, 0, x.size, x.size)
   else:
-    return torch.sparse.spdiags(x.cpu(), torch.tensor([0]).cpu(), (x.size(0), x.size(0)), torch.sparse_csr).cuda()
+    return bkd.to_sp_backend(torch.diag(x, diagonal=0))
 
 def map_nested_dict(
   obj: Any,
@@ -36,7 +36,7 @@ def map_nested_dict(
   """
   Recursively apply a function to all values in a nested dictionary.
 
-  This function traverses a nested dictionary and applies the given 
+  This function traverses a nested dictionary and applies the given
   function to each value. It supports dictionaries, lists, and tuples.
 
   :param obj: The nested dictionary or other container to map.
@@ -86,14 +86,14 @@ def generate_combs(
   """
   Generate all combinations of elements from multiple 1D arrays.
 
-  This function creates a mesh grid from the provided 1D arrays and returns 
-  a 2D numpy array where each row represents a combination of elements 
+  This function creates a mesh grid from the provided 1D arrays and returns
+  a 2D numpy array where each row represents a combination of elements
   from the input arrays.
 
   :param arrays_1d: List of 1D numpy arrays to generate combinations from.
   :type arrays_1d: List[np.ndarray]
 
-  :return: 2D numpy array with each row representing a combination of 
+  :return: 2D numpy array with each row representing a combination of
            elements from the input arrays.
   :rtype: np.ndarray
   """
@@ -109,7 +109,7 @@ def compute_stats(
   :param x: Input array of numeric values.
   :type x: np.ndarray
 
-  :return: A dictionary containing the mean and standard deviation of 
+  :return: A dictionary containing the mean and standard deviation of
            the input array.
   :rtype: Dict[str, float]
 

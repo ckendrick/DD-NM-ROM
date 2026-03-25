@@ -12,7 +12,7 @@ simpy
 sparselinear
 threadpoolctl
 tqdm
-torch==2.8.0a0+gitba56102.rocm631
+torch==2.10.0+rocm643
 torchinfo
 # NOTE: these are installed in the create_env.sh script due to extra options needed
 #-e git+https://github.com/rusty1s/pytorch_sparse.git@master#egg=torch-sparse
@@ -22,7 +22,7 @@ ipykernel
 jupyterlab
 markdown
 markupsafe
-mpi4py==4.1.1.dev0+mpich.8.1.32
+mpi4py==4.1.1+mpich.9.0.1
 notebook
 numpy
 pydot

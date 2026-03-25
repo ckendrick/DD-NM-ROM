@@ -276,7 +276,7 @@ class DD_NM_ROM(object):
     # -------------
     start = time()
     res, hess, cjac = [], [], []
-    cres = np.zeros(self.n_constraints)
+    cres = torch.zeros(self.n_constraints) if bkd.is_torch_backend() else np.zeros(self.n_constraints)
     # > Set Lagrangian multipliers
     lambdas = x[-self.n_constraints:]
     runtime += time()-start
@@ -369,8 +369,12 @@ class DD_NM_ROM(object):
         xi = uv[e_k][s].reshape(-1)
         zi = sub.elem_states[e_k].encode(xi, with_jac=False)
         z.append(zi)
-    z.append(np.zeros(self.n_constraints))
-    return np.concatenate(z)
+    if bkd.is_torch_backend():
+      z.append(torch.zeros(self.n_constraints))
+      return torch.cat(z)
+    else:
+      z.append(np.zeros(self.n_constraints))
+      return np.concatenate(z)
 
   def decode(
     self,
@@ -398,7 +402,7 @@ class DD_NM_ROM(object):
         # Reconstruct/store physical space
         if is_2d:
           uv_i = [state_k.decode(xj, with_jac=False) for xj in xi.T]
-          uv_i = np.vstack(uv_i).T
+          uv_i = torch.vstack(uv_i).T if bkd.is_torch_backend() else np.vstack(uv_i).T
         else:
           uv_i = state_k.decode(xi, with_jac=False)
         uv = self.dd_fom.extract_uv_sub_from_vec(
@@ -458,16 +462,22 @@ class DD_NM_ROM(object):
     self.steady = bool(steady)
     if self.steady:
       dt, nt = 0.0, 1
+    if bkd.is_torch_backend():
+      x0 = bkd.to_backend(x0)
     x, res, *_, flag = solver(x0, dt, nt, guess, use_guess)
     converged = True if (flag[-1] == 0) else False
     # Assemble solution
     uv, z, lambdas = self.assemble_sol(x, map_on_res=True)
+    if bkd.is_torch_backend():
+      uv = bkd.to_numpy(uv)
     return uv, z, lambdas, res, converged
 
   def get_init_sol(
     self,
     x
   ):
+    if bkd.is_torch_backend():
+      x = bkd.to_backend(x)
     return self.encode(x)
 
   def assemble_sol(
@@ -537,6 +547,9 @@ class DD_NM_ROM(object):
             for x_k in ("u", "v"):
                 x_fom = uv_fom[e_k][x_k][s]
                 x_rom = uv_rom[e_k][x_k][s]
+                if bkd.is_torch_backend():
+                  x_fom = bkd.to_numpy(x_fom)
+                  x_rom = bkd.to_numpy(x_rom)
 
                 # ---- L2 contributions (sum over space, keep time) ----
                 num_s += np.sum((x_rom - x_fom) ** 2, axis=axis)

@@ -80,7 +80,7 @@ class Newton(Solver):
     res, jac, res_norm = self.evaluate(x)
     # > Set histories
     start = time()
-    res_hist = [res]
+    res_hist = [bkd.to_numpy(res)]
     res_norm_hist = [res_norm]
     step_hist = [0.0]
     self.model.runtime["total"] += time()-start
@@ -112,7 +112,7 @@ class Newton(Solver):
       # > Update
       start = time()
       it += 1
-      res_hist.append(res)
+      res_hist.append(bkd.to_numpy(res))
       res_norm_hist.append(res_norm)
       step_hist.append(stepsize)
       self.model.runtime["total"] += time()-start
@@ -151,11 +151,12 @@ class Newton(Solver):
         #print(torch.cuda.memory.memory_summary())
         out = (
             x,
-            torch.vstack(res_hist),
+            #torch.vstack(res_hist),
+            np.vstack(res_hist),
             np.array(res_norm_hist),
             np.array(step_hist),
-            np.array(it).reshape(1),
-            np.array(flag).reshape(1)
+            it,
+            flag
         )
     else:
         out = (
@@ -163,8 +164,8 @@ class Newton(Solver):
             np.vstack(res_hist),
             np.array(res_norm_hist),
             np.array(step_hist),
-            np.array(it).reshape(1),
-            np.array(flag).reshape(1)
+            it,
+            flag
         )
     self.model.runtime["total"] += time()-start
     return out

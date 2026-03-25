@@ -254,6 +254,7 @@ class Solver(object):
     """
     res, jac = self.model.res_jac(x)
     start = time()
+    res = bkd.to_backend(res)
     res_norm = torch.dot(res, res) if bkd.is_torch_backend() else np.dot(res,res)
     if (not self.squared_res):
       res_norm = res_norm.sqrt_() if bkd.is_torch_backend() else np.sqrt(res_norm)

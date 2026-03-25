@@ -169,7 +169,7 @@ class DDIndices(object):
     nodes: np.ndarray
   ) -> np.ndarray:
     nodes = np.sort(nodes)
-    if ((len(nodes) > 1) and np.in1d(nodes, self.skeleton_bound).all()):
+    if ((len(nodes) > 1) and np.isin(nodes, self.skeleton_bound).all()):
       if (orient == "vert"):
         shape, axis = (-1,2), 1
       else:
